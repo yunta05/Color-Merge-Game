@@ -360,15 +360,43 @@ function createSoundEngine() {
     };
   }
 
-  const ctx = new AudioCtx();
-  const master = ctx.createGain();
-  master.gain.value = 0.12;
-  master.connect(ctx.destination);
+  let ctx = null;
+  let master = null;
+
+  function ensureContext() {
+    if (ctx) return true;
+    try {
+      ctx = new AudioCtx();
+      master = ctx.createGain();
+      master.gain.value = 0.2;
+      master.connect(ctx.destination);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
 
   function unlock() {
+    if (!ensureContext()) return;
     if (ctx.state === "suspended") {
       ctx.resume();
     }
+  }
+
+  function withAudio(callback) {
+    if (!ensureContext()) return;
+
+    const playNow = () => {
+      if (!ctx || ctx.state !== "running") return;
+      callback();
+    };
+
+    if (ctx.state === "running") {
+      playNow();
+      return;
+    }
+
+    ctx.resume().then(playNow).catch(() => {});
   }
 
   function blip({
@@ -390,8 +418,8 @@ function createSoundEngine() {
     osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), now + duration);
 
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(1600, now);
-    filter.frequency.exponentialRampToValueAtTime(450, now + duration);
+    filter.frequency.setValueAtTime(1800, now);
+    filter.frequency.exponentialRampToValueAtTime(480, now + duration);
     filter.Q.value = q;
 
     amp.gain.setValueAtTime(0.0001, now);
@@ -403,7 +431,7 @@ function createSoundEngine() {
     amp.connect(master);
 
     osc.start(now);
-    osc.stop(now + duration + 0.02);
+    osc.stop(now + duration + 0.03);
   }
 
   function noiseSplash({ duration = 0.08, start = 0, gain = 0.02 }) {
@@ -436,28 +464,38 @@ function createSoundEngine() {
   }
 
   function playMove() {
-    blip({ freq: 560, endFreq: 330, duration: 0.11, gain: 0.04, type: "triangle", q: 3 });
-    noiseSplash({ duration: 0.05, start: 0.01, gain: 0.012 });
+    withAudio(() => {
+      blip({ freq: 560, endFreq: 330, duration: 0.11, gain: 0.05, type: "triangle", q: 3 });
+      noiseSplash({ duration: 0.05, start: 0.01, gain: 0.015 });
+    });
   }
 
   function playSpawn(level = 1) {
-    const pitch = 520 + level * 22;
-    blip({ freq: pitch, endFreq: pitch * 0.78, duration: 0.1, gain: 0.028, type: "sine", q: 4 });
+    withAudio(() => {
+      const pitch = 520 + level * 22;
+      blip({ freq: pitch, endFreq: pitch * 0.78, duration: 0.1, gain: 0.035, type: "sine", q: 4 });
+    });
   }
 
   function playMerge(intensity = 1) {
-    const base = 290 + intensity * 38;
-    blip({ freq: base, endFreq: base * 0.55, duration: 0.17, gain: 0.07, type: "triangle", q: 10 });
-    blip({ freq: base * 1.6, endFreq: base * 0.9, duration: 0.12, gain: 0.04, start: 0.018, type: "sine", q: 6 });
-    noiseSplash({ duration: 0.1, start: 0.016, gain: 0.015 });
+    withAudio(() => {
+      const base = 290 + intensity * 38;
+      blip({ freq: base, endFreq: base * 0.55, duration: 0.17, gain: 0.085, type: "triangle", q: 10 });
+      blip({ freq: base * 1.6, endFreq: base * 0.9, duration: 0.12, gain: 0.05, start: 0.018, type: "sine", q: 6 });
+      noiseSplash({ duration: 0.1, start: 0.016, gain: 0.018 });
+    });
   }
 
   function playUiTap() {
-    blip({ freq: 620, endFreq: 400, duration: 0.08, gain: 0.025, type: "sine", q: 2 });
+    withAudio(() => {
+      blip({ freq: 620, endFreq: 400, duration: 0.08, gain: 0.03, type: "sine", q: 2 });
+    });
   }
 
   function playGameOver() {
-    blip({ freq: 260, endFreq: 120, duration: 0.26, gain: 0.055, type: "sawtooth", q: 4 });
+    withAudio(() => {
+      blip({ freq: 260, endFreq: 120, duration: 0.26, gain: 0.06, type: "sawtooth", q: 4 });
+    });
   }
 
   return {
