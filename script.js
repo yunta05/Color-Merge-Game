@@ -7,7 +7,7 @@ const SCOREBOARD_SIZE = 10;
 const boardElement = document.getElementById("board");
 const scoreElement = document.getElementById("score");
 const highScoreElement = document.getElementById("high-score");
-const turnTimerElement = document.getElementById("turn-timer");
+const speedBonusElement = document.getElementById("speed-bonus");
 const turnGaugeFillElement = document.getElementById("turn-gauge-fill");
 const highScoreListElement = document.getElementById("high-score-list");
 const gameOverElement = document.getElementById("game-over");
@@ -168,9 +168,28 @@ function takeTurn(direction) {
   resetTurnTimer();
 }
 
+function speedMultiplierByRemaining(remainingMs) {
+  const ratio = Math.min(Math.max(remainingMs / TURN_LIMIT_MS, 0), 1);
+  return 1 + ratio * 2; // x1.00 ~ x3.00
+}
+
 function calculateSpeedBonus(remainingMs) {
-  const ratio = remainingMs / TURN_LIMIT_MS;
-  return Math.floor(40 * ratio * ratio);
+  const multiplier = speedMultiplierByRemaining(remainingMs);
+  return Math.floor((multiplier - 1) * 40);
+}
+
+function updateSpeedBonusDisplay(remainingMs) {
+  const multiplier = speedMultiplierByRemaining(remainingMs);
+  speedBonusElement.textContent = `x${multiplier.toFixed(2)}`;
+  speedBonusElement.classList.remove("bonus-mid", "bonus-high", "bonus-max");
+
+  if (multiplier >= 2.7) {
+    speedBonusElement.classList.add("bonus-max");
+  } else if (multiplier >= 2.3) {
+    speedBonusElement.classList.add("bonus-high");
+  } else if (multiplier >= 1.7) {
+    speedBonusElement.classList.add("bonus-mid");
+  }
 }
 
 function move(source, direction) {
@@ -373,14 +392,14 @@ function tickTurnTimer() {
 
   const remainingMs = turnDeadline - performance.now();
   if (remainingMs <= 0) {
-    turnTimerElement.textContent = "0.00s";
+    updateSpeedBonusDisplay(0);
     turnGaugeFillElement.style.transform = "scaleX(0)";
     finishGame("タイムアップ");
     return;
   }
 
   const ratio = remainingMs / TURN_LIMIT_MS;
-  turnTimerElement.textContent = `${(remainingMs / 1000).toFixed(2)}s`;
+  updateSpeedBonusDisplay(remainingMs);
   turnGaugeFillElement.style.transform = `scaleX(${ratio})`;
 
   if (ratio > 0.5) {
