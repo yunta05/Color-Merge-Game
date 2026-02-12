@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <h1>Color Merge Game</h1>
-        <p class="subtitle">素早い操作ほど高得点！</p>
+        <p class="subtitle">120BPM・3-3-7のリズムでハイスコア！</p>
       </div>
       <button id="restart-btn" class="restart-btn" type="button">リスタート</button>
     </header>
@@ -26,13 +26,25 @@
         <strong id="high-score">0</strong>
       </div>
       <div class="score-box timer-box">
-        <span>スピードボーナス</span>
-        <strong id="speed-bonus">x1.00</strong>
+        <span>リズム倍率</span>
+        <strong id="rhythm-multiplier">x1.00</strong>
       </div>
     </section>
 
-    <section class="turn-gauge" aria-label="手番残り時間">
-      <div id="turn-gauge-fill" class="turn-gauge-fill"></div>
+    <section class="rhythm-panel" aria-label="リズムUI">
+      <div class="rhythm-status">
+        <span id="rhythm-label" class="rhythm-label">READY</span>
+        <span id="rhythm-signature" class="rhythm-signature">120 BPM / 3-3-7</span>
+      </div>
+      <div id="rhythm-lane" class="rhythm-lane" role="presentation">
+        <div class="rhythm-center-line"></div>
+        <div id="rhythm-cursor" class="rhythm-cursor"></div>
+      </div>
+      <div class="hp-row" aria-label="体力ゲージ">
+        <span>HP</span>
+        <div class="hp-gauge"><div id="hp-gauge-fill" class="hp-gauge-fill"></div></div>
+        <strong id="hp-value">100</strong>
+      </div>
     </section>
 
     <section class="board-wrap">
@@ -49,7 +61,7 @@
       <ol id="high-score-list"></ol>
     </section>
 
-    <p class="controls">操作: 矢印キー / WASD / スワイプ（1手 2秒制限）</p>
+    <p class="controls">操作: 矢印キー / WASD / スワイプ（120BPM / 3-3-7拍）</p>
   </main>
 
   <script src="script.js"></script>
