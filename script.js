@@ -121,7 +121,7 @@ function onTouchEnd(event) {
 }
 
 function takeTurn(direction) {
-  const { nextBoard, moved, gainedScore, motionMap, mergedIds } = move(board, direction);
+  const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels } = move(board, direction);
   if (!moved) return;
 
   board = nextBoard;
@@ -133,8 +133,8 @@ function takeTurn(direction) {
   if (spawnedTile) {
     sound.playSpawn(spawnedTile.level);
   }
-  if (mergedIds.size > 0) {
-    sound.playMerge(Math.min(mergedIds.size, 3));
+  if (mergedLevels.length > 0) {
+    sound.playMergeNotes(mergedLevels);
   }
 
   if (isBoardLocked(board)) {
@@ -148,6 +148,7 @@ function move(source, direction) {
   const next = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
   const motionMap = new Map();
   const mergedIds = new Set();
+  const mergedLevels = [];
   let moved = false;
   let gainedScore = 0;
 
@@ -163,6 +164,7 @@ function move(source, direction) {
         const mergedTile = createTile(current.tile.level + 1);
         mergedLine.push({ tile: mergedTile, from: current.pos, merged: true });
         mergedIds.add(mergedTile.id);
+        mergedLevels.push(mergedTile.level);
         gainedScore += scoreByLevel(mergedTile.level);
         i += 1;
       } else {
@@ -184,7 +186,7 @@ function move(source, direction) {
     }
   }
 
-  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds };
+  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds, mergedLevels };
 }
 
 function readLine(source, direction, index) {
@@ -354,7 +356,7 @@ function createSoundEngine() {
       unlock() {},
       playMove() {},
       playSpawn() {},
-      playMerge() {},
+      playMergeNotes() {},
       playUiTap() {},
       playGameOver() {},
     };
@@ -482,11 +484,65 @@ function createSoundEngine() {
     src.start(now);
   }
 
+
+  function pianoFrequencyForLevel(level) {
+    const scale = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25];
+    const octave = Math.floor((Math.max(1, level) - 1) / scale.length);
+    const base = scale[(Math.max(1, level) - 1) % scale.length];
+    return base * (2 ** octave);
+  }
+
+  function playPianoNote(freq, { start = 0, gain = 0.12 } = {}) {
+    const now = ctx.currentTime + start;
+    const amp = ctx.createGain();
+    const low = ctx.createOscillator();
+    const mid = ctx.createOscillator();
+    const high = ctx.createOscillator();
+    const lp = ctx.createBiquadFilter();
+
+    low.type = "triangle";
+    mid.type = "sine";
+    high.type = "triangle";
+
+    low.frequency.setValueAtTime(freq, now);
+    mid.frequency.setValueAtTime(freq * 2, now);
+    high.frequency.setValueAtTime(freq * 3, now);
+
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(3200, now);
+    lp.frequency.exponentialRampToValueAtTime(1700, now + 0.3);
+
+    amp.gain.setValueAtTime(0.0001, now);
+    amp.gain.exponentialRampToValueAtTime(gain, now + 0.012);
+    amp.gain.exponentialRampToValueAtTime(gain * 0.35, now + 0.08);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+
+    low.connect(lp);
+    mid.connect(lp);
+    high.connect(lp);
+    lp.connect(amp);
+    amp.connect(master);
+
+    low.start(now);
+    mid.start(now);
+    high.start(now);
+    low.stop(now + 0.45);
+    mid.stop(now + 0.45);
+    high.stop(now + 0.45);
+  }
+
   function playMove() {
     withAudio(() => {
-      tone({ freq: 520, endFreq: 290, duration: 0.12, gain: 0.09, type: "triangle", q: 4, pan: -0.05 });
-      tone({ freq: 760, endFreq: 420, duration: 0.08, start: 0.012, gain: 0.05, type: "sine", q: 6, pan: 0.04 });
-      splash({ duration: 0.05, start: 0.015, gain: 0.025, freq: 840 });
+      tone({
+        freq: 1300,
+        endFreq: 980,
+        duration: 0.035,
+        gain: 0.085,
+        type: "square",
+        q: 1.4,
+        lowpassStart: 5200,
+        lowpassEnd: 1800,
+      });
     });
   }
 
@@ -498,14 +554,18 @@ function createSoundEngine() {
     });
   }
 
-  function playMerge(intensity = 1) {
+  function playMergeNotes(levels = []) {
     withAudio(() => {
-      const size = Math.max(1, intensity);
-      const base = 240 + size * 48;
-      tone({ freq: base, endFreq: base * 0.5, duration: 0.2, gain: 0.14, type: "triangle", q: 11, pan: -0.08, lowpassStart: 1900, lowpassEnd: 380 });
-      tone({ freq: base * 1.5, endFreq: base * 0.95, duration: 0.14, start: 0.014, gain: 0.09, type: "sine", q: 8, pan: 0.08, lowpassStart: 2400, lowpassEnd: 700 });
-      tone({ freq: base * 1.08, endFreq: base * 0.66, duration: 0.12, start: 0.028, gain: 0.08, type: "square", q: 5, pan: 0 });
-      splash({ duration: 0.12, start: 0.02, gain: 0.038, freq: 720 + size * 55 });
+      const sorted = [...levels].sort((a, b) => a - b);
+      sorted.forEach((level, i) => {
+        const freq = pianoFrequencyForLevel(level);
+        playPianoNote(freq, { start: i * 0.07, gain: 0.13 - Math.min(i * 0.01, 0.04) });
+      });
+
+      const highest = sorted[sorted.length - 1];
+      if (highest) {
+        splash({ duration: 0.06, start: sorted.length * 0.06, gain: 0.018, freq: 900 });
+      }
     });
   }
 
@@ -526,7 +586,7 @@ function createSoundEngine() {
     unlock,
     playMove,
     playSpawn,
-    playMerge,
+    playMergeNotes,
     playUiTap,
     playGameOver,
   };
