@@ -258,8 +258,6 @@ function renderBoard(mergedMask = Array.from({ length: SIZE }, () => Array(SIZE)
   const tileLayer = document.createElement("div");
   tileLayer.className = "tile-layer";
 
-  const tileSize = getTileStep();
-
   for (let r = 0; r < SIZE; r += 1) {
     for (let c = 0; c < SIZE; c += 1) {
       const tile = board[r][c];
@@ -269,21 +267,14 @@ function renderBoard(mergedMask = Array.from({ length: SIZE }, () => Array(SIZE)
       node.className = "tile";
       node.textContent = String(tile.level);
       node.style.backgroundColor = colorForLevel(tile.level);
-      node.style.transform = `translate(${c * tileSize}px, ${r * tileSize}px)`;
+      node.style.gridRow = String(r + 1);
+      node.style.gridColumn = String(c + 1);
       node.dataset.merged = String(mergedMask[r][c]);
       tileLayer.appendChild(node);
     }
   }
 
   boardElement.appendChild(tileLayer);
-}
-
-function getTileStep() {
-  const styles = getComputedStyle(boardElement);
-  const gap = Number.parseFloat(styles.gap) || 0;
-  const width = boardElement.clientWidth;
-  const tile = (width - gap * (SIZE + 1)) / SIZE;
-  return tile + gap;
 }
 
 window.addEventListener("resize", () => renderBoard());
