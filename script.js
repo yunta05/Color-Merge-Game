@@ -11,6 +11,7 @@ let board = [];
 let score = 0;
 let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
 let isGameOver = false;
+let nextTileId = 1;
 
 const touch = {
   x: 0,
@@ -45,6 +46,12 @@ function initGame() {
   spawnRandomTile();
   spawnRandomTile();
   renderBoard();
+}
+
+function createTile(level) {
+  const tile = { id: nextTileId, level };
+  nextTileId += 1;
+  return tile;
 }
 
 function handleKeydown(event) {
@@ -101,13 +108,13 @@ function onTouchEnd(event) {
 }
 
 function takeTurn(direction) {
-  const { nextBoard, moved, gainedScore, mergedMask } = move(board, direction);
+  const { nextBoard, moved, gainedScore, motionMap, mergedIds } = move(board, direction);
   if (!moved) return;
 
   board = nextBoard;
   updateScore(gainedScore);
-  spawnRandomTile();
-  renderBoard(mergedMask);
+  const spawnedTile = spawnRandomTile();
+  renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
 
   if (isBoardLocked(board)) {
     isGameOver = true;
@@ -117,66 +124,69 @@ function takeTurn(direction) {
 
 function move(source, direction) {
   const next = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
-  const mergedMask = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+  const motionMap = new Map();
+  const mergedIds = new Set();
   let moved = false;
   let gainedScore = 0;
 
-  const iterate = (index) => {
-    const line = readLine(source, direction, index).filter(Boolean);
+  for (let index = 0; index < SIZE; index += 1) {
+    const line = readLine(source, direction, index).filter((entry) => entry.tile);
     const mergedLine = [];
 
     for (let i = 0; i < line.length; i += 1) {
       const current = line[i];
       const following = line[i + 1];
 
-      if (following && current.level === following.level) {
-        const mergedTile = { level: current.level + 1 };
-        mergedLine.push({ tile: mergedTile, merged: true });
+      if (following && current.tile.level === following.tile.level) {
+        const mergedTile = createTile(current.tile.level + 1);
+        mergedLine.push({ tile: mergedTile, from: current.pos, merged: true });
+        mergedIds.add(mergedTile.id);
         gainedScore += scoreByLevel(mergedTile.level);
         i += 1;
       } else {
-        mergedLine.push({ tile: { level: current.level }, merged: false });
+        mergedLine.push({ tile: current.tile, from: current.pos, merged: false });
       }
     }
 
     while (mergedLine.length < SIZE) {
-      mergedLine.push({ tile: null, merged: false });
+      mergedLine.push({ tile: null, from: null, merged: false });
     }
 
-    writeLine(next, mergedMask, direction, index, mergedLine);
-
-    for (let pos = 0; pos < SIZE; pos += 1) {
-      const [r, c] = positionFor(direction, index, pos);
-      const original = source[r][c];
-      const rewritten = next[r][c];
-      if ((original && !rewritten) || (!original && rewritten) || (original && rewritten && original.level !== rewritten.level)) {
-        moved = true;
-      }
-    }
-  };
-
-  for (let i = 0; i < SIZE; i += 1) {
-    iterate(i);
+    writeLine(next, direction, index, mergedLine, motionMap);
   }
 
-  return { nextBoard: next, moved, gainedScore, mergedMask };
+  for (const motion of motionMap.values()) {
+    if (motion.from.row !== motion.to.row || motion.from.col !== motion.to.col || mergedIds.has(motion.id)) {
+      moved = true;
+      break;
+    }
+  }
+
+  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds };
 }
 
 function readLine(source, direction, index) {
   const values = [];
   for (let pos = 0; pos < SIZE; pos += 1) {
     const [r, c] = positionFor(direction, index, pos);
-    values.push(source[r][c]);
+    values.push({ tile: source[r][c], pos: { row: r, col: c } });
   }
   return values;
 }
 
-function writeLine(target, mergedMask, direction, index, line) {
+function writeLine(target, direction, index, line, motionMap) {
   for (let pos = 0; pos < SIZE; pos += 1) {
     const [r, c] = positionFor(direction, index, pos);
     const item = line[pos];
     target[r][c] = item.tile;
-    mergedMask[r][c] = item.merged;
+
+    if (item.tile && item.from) {
+      motionMap.set(item.tile.id, {
+        id: item.tile.id,
+        from: item.from,
+        to: { row: r, col: c },
+      });
+    }
   }
 }
 
@@ -203,10 +213,12 @@ function spawnRandomTile() {
     }
   }
 
-  if (!empties.length) return;
+  if (!empties.length) return null;
 
   const [row, col] = empties[Math.floor(Math.random() * empties.length)];
-  board[row][col] = { level: Math.random() < 0.9 ? 1 : 2 };
+  const tile = createTile(Math.random() < 0.9 ? 1 : 2);
+  board[row][col] = tile;
+  return tile;
 }
 
 function isBoardLocked(state) {
@@ -251,12 +263,22 @@ function colorForLevel(level) {
   return `hsl(${hue} ${saturation}% ${lightness}%)`;
 }
 
-function renderBoard(mergedMask = Array.from({ length: SIZE }, () => Array(SIZE).fill(false))) {
+function getTileStep() {
+  const styles = getComputedStyle(boardElement);
+  const gap = Number.parseFloat(styles.gap) || 0;
+  const tile = boardElement.querySelector(".cell")?.clientWidth || 0;
+  return tile + gap;
+}
+
+function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId = null } = {}) {
   const oldLayer = boardElement.querySelector(".tile-layer");
   if (oldLayer) oldLayer.remove();
 
   const tileLayer = document.createElement("div");
   tileLayer.className = "tile-layer";
+
+  const movingNodes = [];
+  const step = getTileStep();
 
   for (let r = 0; r < SIZE; r += 1) {
     for (let c = 0; c < SIZE; c += 1) {
@@ -269,12 +291,38 @@ function renderBoard(mergedMask = Array.from({ length: SIZE }, () => Array(SIZE)
       node.style.backgroundColor = colorForLevel(tile.level);
       node.style.gridRow = String(r + 1);
       node.style.gridColumn = String(c + 1);
-      node.dataset.merged = String(mergedMask[r][c]);
+
+      const motion = motionMap.get(tile.id);
+      if (motion) {
+        const dx = (motion.from.col - motion.to.col) * step;
+        const dy = (motion.from.row - motion.to.row) * step;
+        if (dx !== 0 || dy !== 0) {
+          node.classList.add("tile-moving");
+          node.style.setProperty("--from-x", `${dx}px`);
+          node.style.setProperty("--from-y", `${dy}px`);
+          movingNodes.push(node);
+        }
+      }
+
+      if (mergedIds.has(tile.id)) {
+        node.classList.add("tile-merged");
+      }
+
+      if (spawnedId && tile.id === spawnedId) {
+        node.classList.add("tile-spawned");
+      }
+
       tileLayer.appendChild(node);
     }
   }
 
   boardElement.appendChild(tileLayer);
+
+  if (movingNodes.length) {
+    requestAnimationFrame(() => {
+      movingNodes.forEach((node) => node.classList.add("tile-moving-active"));
+    });
+  }
 }
 
 window.addEventListener("resize", () => renderBoard());
