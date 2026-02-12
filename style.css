@@ -1,57 +1,358 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Color Merge Game</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <main class="game-wrapper">
-    <header class="topbar">
-      <div>
-        <h1>Color Merge Game</h1>
-        <p class="subtitle">素早い操作ほど高得点！</p>
-      </div>
-      <button id="restart-btn" class="restart-btn" type="button">リスタート</button>
-    </header>
+:root {
+  --bg: #f4f2ee;
+  --panel: #ffffff;
+  --ink: #222222;
+  --muted: #6e6a65;
+  --board: #c7bfb6;
+  --empty: rgba(255, 255, 255, 0.32);
+  --tile-size: min(18vw, 90px);
+  --gap: min(2vw, 10px);
+}
 
-    <section class="scoreboard" aria-label="スコア情報">
-      <div class="score-box">
-        <span>スコア</span>
-        <strong id="score">0</strong>
-      </div>
-      <div class="score-box">
-        <span>ハイスコア</span>
-        <strong id="high-score">0</strong>
-      </div>
-      <div class="score-box timer-box">
-        <span>スピードボーナス</span>
-        <strong id="speed-bonus">x1.00</strong>
-      </div>
-    </section>
+* {
+  box-sizing: border-box;
+}
 
-    <section class="turn-gauge" aria-label="手番残り時間">
-      <div id="turn-gauge-fill" class="turn-gauge-fill"></div>
-    </section>
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 20% 20%, #ffffff, var(--bg));
+  color: var(--ink);
+  font-family: "Inter", "Noto Sans JP", system-ui, -apple-system, sans-serif;
+}
 
-    <section class="board-wrap">
-      <div id="score-popups" class="score-popups" aria-hidden="true"></div>
-      <div id="board" class="board" aria-label="ゲーム盤面" role="grid"></div>
-      <div id="game-over" class="game-over hidden" aria-live="polite">
-        <p id="game-over-text">ゲームオーバー</p>
-        <button id="retry-btn" class="restart-btn" type="button">もう一度</button>
-      </div>
-    </section>
+.game-wrapper {
+  width: min(92vw, 460px);
+  display: grid;
+  gap: 14px;
+}
 
-    <section class="ranking" aria-label="ハイスコアランキング">
-      <h2>ハイスコアランキング</h2>
-      <ol id="high-score-list"></ol>
-    </section>
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
 
-    <p class="controls">操作: 矢印キー / WASD / スワイプ（1手 2秒制限）</p>
-  </main>
+h1 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  margin: 0;
+}
 
-  <script src="script.js"></script>
-</body>
-</html>
+.subtitle,
+.controls {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.restart-btn {
+  border: none;
+  border-radius: 10px;
+  background: #635b52;
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scoreboard {
+  display: flex;
+  gap: 10px;
+}
+
+.score-box {
+  flex: 1;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.timer-box strong {
+  color: #2a6666;
+  transition: color 120ms ease, text-shadow 120ms ease, transform 120ms ease;
+}
+
+.timer-box strong.bonus-mid {
+  color: #d0841e;
+  text-shadow: 0 0 10px rgba(237, 150, 42, 0.28);
+}
+
+.timer-box strong.bonus-high {
+  color: #de4e95;
+  text-shadow: 0 0 12px rgba(225, 70, 136, 0.38);
+  transform: scale(1.05);
+}
+
+.timer-box strong.bonus-max {
+  color: #8e41ff;
+  text-shadow: 0 0 14px rgba(143, 66, 255, 0.5);
+  transform: scale(1.08);
+}
+
+.score-box span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.score-box strong {
+  font-size: 1.2rem;
+}
+
+.turn-gauge {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #d9d4cd;
+  overflow: hidden;
+}
+
+.turn-gauge-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #3ec7cb, #3ba357 85%);
+  transform-origin: left center;
+  transition: transform 90ms linear, background-color 90ms linear;
+}
+
+.board-wrap {
+  position: relative;
+  width: fit-content;
+  margin-inline: auto;
+}
+
+
+.score-popups {
+  position: absolute;
+  inset: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
+  pointer-events: none;
+  z-index: 12;
+}
+
+.score-popup {
+  align-self: center;
+  justify-self: center;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.82);
+  color: #fff4a4;
+  background: linear-gradient(180deg, #fffed8 0%, #ffe677 45%, #ffbc2b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: 0;
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.75),
+    0 0 10px rgba(255, 212, 92, 0.88),
+    0 0 24px rgba(255, 128, 0, 0.62),
+    0 14px 26px rgba(197, 56, 0, 0.46);
+  transform: translateY(8px) scale(0.6) rotate(-6deg);
+  animation: score-pop-fade 760ms cubic-bezier(0.16, 0.88, 0.25, 1.04) forwards;
+  font-size: 1.05rem;
+}
+
+.score-popup.score-popup-active {
+  opacity: 1;
+}
+
+.score-popup.score-popup-mid {
+  font-size: 1.2rem;
+}
+
+.score-popup.score-popup-high {
+  font-size: 1.5rem;
+  background: linear-gradient(180deg, #fff8f5 0%, #ff9ef5 45%, #ff4d9c 100%);
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.8),
+    0 0 14px rgba(255, 132, 233, 0.9),
+    0 0 28px rgba(255, 56, 173, 0.72),
+    0 18px 28px rgba(175, 24, 133, 0.55);
+}
+
+.score-popup.score-popup-epic {
+  font-size: 1.82rem;
+  background: linear-gradient(180deg, #f9fbff 0%, #95f2ff 35%, #6f9dff 63%, #bd61ff 100%);
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.86),
+    0 0 18px rgba(141, 237, 255, 0.95),
+    0 0 34px rgba(121, 91, 255, 0.85),
+    0 20px 30px rgba(86, 46, 199, 0.6);
+}
+
+@keyframes score-pop-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.5) rotate(-8deg);
+    filter: hue-rotate(0deg);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1.25) rotate(4deg);
+    filter: hue-rotate(36deg);
+  }
+  44% {
+    transform: translateY(-14px) scale(1.08) rotate(-3deg);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(-24px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-38px) scale(0.92);
+    filter: hue-rotate(70deg);
+  }
+}
+
+.board {
+  position: relative;
+  background: var(--board);
+  border-radius: 14px;
+  padding: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
+  touch-action: none;
+}
+
+.cell {
+  border-radius: 10px;
+  background: var(--empty);
+}
+
+.tile-layer {
+  position: absolute;
+  inset: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
+  pointer-events: none;
+}
+
+.tile {
+  --from-x: 0px;
+  --from-y: 0px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 3px rgba(8, 20, 33, 0.4);
+  box-shadow: 0 8px 16px rgba(10, 36, 64, 0.26), inset 0 -6px 12px rgba(255, 255, 255, 0.14);
+  transform: translate(0, 0) scale(1);
+  will-change: transform, filter;
+}
+
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 6% 10% 44% 10%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0));
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  pointer-events: none;
+}
+
+.tile-moving {
+  transform: translate(var(--from-x), var(--from-y)) scale(0.985);
+  filter: saturate(1.08) brightness(1.04);
+}
+
+.tile-moving-active {
+  transition: transform 260ms cubic-bezier(0.17, 0.84, 0.22, 1.04), filter 260ms ease;
+  transform: translate(0, 0) scale(1);
+  filter: saturate(1) brightness(1);
+}
+
+.tile-spawned {
+  animation: droplet-pop 230ms cubic-bezier(0.16, 0.86, 0.34, 1.2);
+}
+
+.tile-merged {
+  animation: syrup-merge 360ms cubic-bezier(0.18, 0.89, 0.22, 1.15);
+}
+
+@keyframes droplet-pop {
+  0% { opacity: 0; transform: translateY(5px) scale(0.72, 1.24); filter: saturate(1.25) brightness(1.14); }
+  55% { opacity: 1; transform: translateY(-2px) scale(1.06, 0.95); }
+  100% { transform: translateY(0) scale(1, 1); filter: saturate(1) brightness(1); }
+}
+
+@keyframes syrup-merge {
+  0% { transform: scale(1.22, 0.78); filter: brightness(1.24) saturate(1.35); box-shadow: 0 0 0 rgba(255, 255, 255, 0.55), 0 8px 16px rgba(10, 36, 64, 0.26); }
+  28% { transform: scale(0.86, 1.2); }
+  54% { transform: scale(1.09, 0.93); box-shadow: 0 0 24px rgba(255, 255, 255, 0.38), 0 8px 16px rgba(10, 36, 64, 0.26); }
+  100% { transform: scale(1, 1); filter: brightness(1) saturate(1); box-shadow: 0 8px 16px rgba(10, 36, 64, 0.26), inset 0 -6px 12px rgba(255, 255, 255, 0.14); }
+}
+
+.ranking {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.ranking h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.ranking ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.ranking li {
+  font-weight: 700;
+  color: #4d4740;
+}
+
+.game-over {
+  position: absolute;
+  inset: 0;
+  background: rgba(42, 36, 32, 0.78);
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  gap: 10px;
+  color: #fff;
+  text-align: center;
+}
+
+.game-over p { margin: 0; font-size: 1.4rem; font-weight: 800; }
+.hidden { display: none; }
+
+@media (max-width: 420px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .restart-btn { width: 100%; }
+  .scoreboard { flex-direction: column; }
+}
