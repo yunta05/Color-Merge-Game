@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <h1>Color Merge Game</h1>
-        <p class="subtitle">色タイルを合体させてハイスコアを目指そう</p>
+        <p class="subtitle">素早い操作ほど高得点！</p>
       </div>
       <button id="restart-btn" class="restart-btn" type="button">リスタート</button>
     </header>
@@ -25,17 +25,30 @@
         <span>ハイスコア</span>
         <strong id="high-score">0</strong>
       </div>
+      <div class="score-box timer-box">
+        <span>手番タイマー</span>
+        <strong id="turn-timer">2.00s</strong>
+      </div>
+    </section>
+
+    <section class="turn-gauge" aria-label="手番残り時間">
+      <div id="turn-gauge-fill" class="turn-gauge-fill"></div>
     </section>
 
     <section class="board-wrap">
       <div id="board" class="board" aria-label="ゲーム盤面" role="grid"></div>
       <div id="game-over" class="game-over hidden" aria-live="polite">
-        <p>ゲームオーバー</p>
+        <p id="game-over-text">ゲームオーバー</p>
         <button id="retry-btn" class="restart-btn" type="button">もう一度</button>
       </div>
     </section>
 
-    <p class="controls">操作: 矢印キー / WASD / スワイプ</p>
+    <section class="ranking" aria-label="ハイスコアランキング">
+      <h2>ハイスコアランキング</h2>
+      <ol id="high-score-list"></ol>
+    </section>
+
+    <p class="controls">操作: 矢印キー / WASD / スワイプ（1手 2秒制限）</p>
   </main>
 
   <script src="script.js"></script>
