@@ -1,9 +1,5 @@
 const SIZE = 4;
-const BPM = 120;
-const BEAT_MS = (60_000 / BPM);
-const RHYTHM_PATTERN = [3, 3, 7];
-const RHYTHM_CYCLE_BEATS = RHYTHM_PATTERN.reduce((sum, n) => sum + n, 0);
-const RHYTHM_CYCLE_MS = RHYTHM_CYCLE_BEATS * BEAT_MS;
+const TURN_LIMIT_MS = 2000;
 const STORAGE_KEY = "color-merge-high-score";
 const SCOREBOARD_KEY = "color-merge-scoreboard";
 const SCOREBOARD_SIZE = 10;
@@ -12,12 +8,8 @@ const boardElement = document.getElementById("board");
 const scorePopupsElement = document.getElementById("score-popups");
 const scoreElement = document.getElementById("score");
 const highScoreElement = document.getElementById("high-score");
-const rhythmMultiplierElement = document.getElementById("rhythm-multiplier");
-const rhythmLabelElement = document.getElementById("rhythm-label");
-const rhythmLaneElement = document.getElementById("rhythm-lane");
-const rhythmCursorElement = document.getElementById("rhythm-cursor");
-const hpGaugeFillElement = document.getElementById("hp-gauge-fill");
-const hpValueElement = document.getElementById("hp-value");
+const speedBonusElement = document.getElementById("speed-bonus");
+const turnGaugeFillElement = document.getElementById("turn-gauge-fill");
 const highScoreListElement = document.getElementById("high-score-list");
 const gameOverElement = document.getElementById("game-over");
 const gameOverTextElement = document.getElementById("game-over-text");
@@ -30,13 +22,8 @@ let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
 let scoreBoard = loadScoreBoard();
 let isGameOver = false;
 let nextTileId = 1;
-let health = 100;
-let rhythmMultiplier = 1;
-let rhythmCombo = 0;
-let rhythmBeatIndex = 0;
-let rhythmBaseTime = 0;
-let rhythmLabelTimeout = 0;
-let rhythmRaf = 0;
+let turnDeadline = 0;
+let timerRaf = 0;
 
 const touch = {
   x: 0,
@@ -83,7 +70,7 @@ function initGame() {
   spawnRandomTile();
   spawnRandomTile();
   renderBoard();
-  initRhythmState();
+  resetTurnTimer();
 }
 
 function createTile(level) {
@@ -152,17 +139,15 @@ function takeTurn(direction) {
   const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels, mergeEvents } = move(board, direction);
   if (!moved) return;
 
-  const rhythmJudge = evaluateRhythmTiming(performance.now());
+  const remainingMs = Math.max(turnDeadline - performance.now(), 0);
+  const speedBonus = calculateSpeedBonus(remainingMs);
 
   board = nextBoard;
-  const turnGain = Math.floor(gainedScore * rhythmMultiplier);
+  const turnGain = gainedScore + speedBonus;
   updateScore(turnGain);
   if (mergeEvents.length > 0) {
-    const scaledEvents = mergeEvents.map((event) => ({ ...event, points: Math.floor(event.points * rhythmMultiplier) }));
-    showMergeScorePopups(scaledEvents);
+    showMergeScorePopups(mergeEvents);
   }
-
-  applyRhythmResult(rhythmJudge);
 
   const spawnedTile = spawnRandomTile();
   renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
@@ -185,131 +170,31 @@ function takeTurn(direction) {
     return;
   }
 
+  resetTurnTimer();
 }
 
-function initRhythmState() {
-  health = 100;
-  rhythmMultiplier = 1;
-  rhythmCombo = 0;
-  rhythmBeatIndex = 0;
-  rhythmBaseTime = performance.now();
-
-  if (rhythmLabelTimeout) {
-    clearTimeout(rhythmLabelTimeout);
-    rhythmLabelTimeout = 0;
-  }
-
-  if (rhythmRaf) cancelAnimationFrame(rhythmRaf);
-  updateRhythmUi("READY");
-  rhythmRaf = requestAnimationFrame(tickRhythmLane);
+function speedMultiplierByRemaining(remainingMs) {
+  const ratio = Math.min(Math.max(remainingMs / TURN_LIMIT_MS, 0), 1);
+  return 1 + ratio * 2; // x1.00 ~ x3.00
 }
 
-function evaluateRhythmTiming(now) {
-  const expected = rhythmBaseTime + (rhythmBeatIndex * BEAT_MS);
-  const delta = now - expected;
-  const absDelta = Math.abs(delta);
-
-  let grade = "BAD";
-  let healthDelta = -14;
-
-  if (absDelta <= 70) {
-    grade = "GREAT";
-    healthDelta = 10;
-  } else if (absDelta <= 140) {
-    grade = "GOOD";
-    healthDelta = 4;
-  } else if (absDelta <= 220) {
-    grade = "BAD";
-    healthDelta = -8;
-  }
-
-  rhythmBeatIndex += 1;
-  return { grade, delta, healthDelta };
+function calculateSpeedBonus(remainingMs) {
+  const multiplier = speedMultiplierByRemaining(remainingMs);
+  return Math.floor((multiplier - 1) * 40);
 }
 
-function applyRhythmResult(result) {
-  health = clamp(health + result.healthDelta, 0, 100);
+function updateSpeedBonusDisplay(remainingMs) {
+  const multiplier = speedMultiplierByRemaining(remainingMs);
+  speedBonusElement.textContent = `x${multiplier.toFixed(2)}`;
+  speedBonusElement.classList.remove("bonus-mid", "bonus-high", "bonus-max");
 
-  if (result.grade === "GREAT") {
-    rhythmCombo += 1;
-  } else if (result.grade === "GOOD") {
-    rhythmCombo = Math.max(rhythmCombo - 1, 0);
-  } else {
-    rhythmCombo = 0;
+  if (multiplier >= 2.7) {
+    speedBonusElement.classList.add("bonus-max");
+  } else if (multiplier >= 2.3) {
+    speedBonusElement.classList.add("bonus-high");
+  } else if (multiplier >= 1.7) {
+    speedBonusElement.classList.add("bonus-mid");
   }
-
-  const comboBoost = Math.min(rhythmCombo * 0.06, 2.2);
-  const gradeBoost = result.grade === "GREAT" ? 0.25 : result.grade === "GOOD" ? 0.1 : -0.18;
-  rhythmMultiplier = clamp(1 + comboBoost + gradeBoost, 1, 3.5);
-
-  updateRhythmUi(result.grade);
-
-  if (health <= 0) {
-    finishGame("リズム失敗でダウン");
-  }
-}
-
-function updateRhythmUi(grade) {
-  rhythmMultiplierElement.textContent = `x${rhythmMultiplier.toFixed(2)}`;
-  rhythmMultiplierElement.classList.remove("bonus-mid", "bonus-high", "bonus-max");
-  if (rhythmMultiplier >= 2.8) {
-    rhythmMultiplierElement.classList.add("bonus-max");
-  } else if (rhythmMultiplier >= 2.1) {
-    rhythmMultiplierElement.classList.add("bonus-high");
-  } else if (rhythmMultiplier >= 1.5) {
-    rhythmMultiplierElement.classList.add("bonus-mid");
-  }
-
-  hpGaugeFillElement.style.transform = `scaleX(${health / 100})`;
-  hpGaugeFillElement.style.background = health > 60
-    ? "linear-gradient(90deg, #42d77f, #59d9d7 85%)"
-    : health > 30
-      ? "linear-gradient(90deg, #ffd358, #ff9f40 85%)"
-      : "linear-gradient(90deg, #ff7e73, #e04343 85%)";
-  hpValueElement.textContent = String(Math.round(health));
-
-  rhythmLabelElement.textContent = grade;
-  rhythmLabelElement.classList.remove("judge-great", "judge-good", "judge-bad");
-  if (grade === "GREAT") {
-    rhythmLabelElement.classList.add("judge-great");
-  } else if (grade === "GOOD") {
-    rhythmLabelElement.classList.add("judge-good");
-  } else if (grade === "BAD") {
-    rhythmLabelElement.classList.add("judge-bad");
-  }
-
-  if (rhythmLabelTimeout) clearTimeout(rhythmLabelTimeout);
-  rhythmLabelTimeout = setTimeout(() => {
-    if (isGameOver) return;
-    rhythmLabelElement.textContent = "KEEP";
-    rhythmLabelElement.classList.remove("judge-great", "judge-good", "judge-bad");
-  }, 260);
-}
-
-function tickRhythmLane() {
-  if (isGameOver) return;
-
-  const now = performance.now();
-  const cyclePosition = ((now - rhythmBaseTime) % RHYTHM_CYCLE_MS + RHYTHM_CYCLE_MS) % RHYTHM_CYCLE_MS;
-  const normalized = cyclePosition / RHYTHM_CYCLE_MS;
-  const wave = Math.sin(normalized * Math.PI * 2);
-  rhythmCursorElement.style.left = `${50 + wave * 46}%`;
-
-  rhythmLaneElement.classList.remove("segment-a", "segment-b", "segment-c");
-  const beatProgress = cyclePosition / BEAT_MS;
-  if (beatProgress < RHYTHM_PATTERN[0]) {
-    rhythmLaneElement.classList.add("segment-a");
-  } else if (beatProgress < RHYTHM_PATTERN[0] + RHYTHM_PATTERN[1]) {
-    rhythmLaneElement.classList.add("segment-b");
-  } else {
-    rhythmLaneElement.classList.add("segment-c");
-  }
-
-  rhythmRaf = requestAnimationFrame(tickRhythmLane);
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function showMergeScorePopups(mergeEvents) {
@@ -543,11 +428,42 @@ function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId =
   }
 }
 
+function resetTurnTimer() {
+  turnDeadline = performance.now() + TURN_LIMIT_MS;
+  if (timerRaf) cancelAnimationFrame(timerRaf);
+  tickTurnTimer();
+}
+
+function tickTurnTimer() {
+  if (isGameOver) return;
+
+  const remainingMs = turnDeadline - performance.now();
+  if (remainingMs <= 0) {
+    updateSpeedBonusDisplay(0);
+    turnGaugeFillElement.style.transform = "scaleX(0)";
+    finishGame("タイムアップ");
+    return;
+  }
+
+  const ratio = remainingMs / TURN_LIMIT_MS;
+  updateSpeedBonusDisplay(remainingMs);
+  turnGaugeFillElement.style.transform = `scaleX(${ratio})`;
+
+  if (ratio > 0.5) {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #3ec7cb, #3ba357 85%)";
+  } else if (ratio > 0.25) {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #f2bc46, #e6942a 85%)";
+  } else {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #ef6b5a, #c44444 85%)";
+  }
+
+  timerRaf = requestAnimationFrame(tickTurnTimer);
+}
+
 function finishGame(reason) {
   if (isGameOver) return;
   isGameOver = true;
-  if (rhythmRaf) cancelAnimationFrame(rhythmRaf);
-  if (rhythmLabelTimeout) clearTimeout(rhythmLabelTimeout);
+  if (timerRaf) cancelAnimationFrame(timerRaf);
   gameOverTextElement.textContent = reason;
   gameOverElement.classList.remove("hidden");
   registerScore(score);
@@ -574,18 +490,16 @@ function registerScore(value) {
 
 function renderScoreBoard() {
   highScoreListElement.innerHTML = "";
-  highScoreListElement.classList.remove("is-empty");
   if (scoreBoard.length === 0) {
     const li = document.createElement("li");
     li.textContent = "まだ記録がありません";
     highScoreListElement.appendChild(li);
-    highScoreListElement.classList.add("is-empty");
     return;
   }
 
-  scoreBoard.forEach((value) => {
+  scoreBoard.forEach((value, index) => {
     const li = document.createElement("li");
-    li.textContent = String(value);
+    li.textContent = `${index + 1}. ${value}`;
     highScoreListElement.appendChild(li);
   });
 }
