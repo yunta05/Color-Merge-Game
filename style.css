@@ -75,6 +75,24 @@ h1 {
 
 .timer-box strong {
   color: #2a6666;
+  transition: color 120ms ease, text-shadow 120ms ease, transform 120ms ease;
+}
+
+.timer-box strong.bonus-mid {
+  color: #d0841e;
+  text-shadow: 0 0 10px rgba(237, 150, 42, 0.28);
+}
+
+.timer-box strong.bonus-high {
+  color: #de4e95;
+  text-shadow: 0 0 12px rgba(225, 70, 136, 0.38);
+  transform: scale(1.05);
+}
+
+.timer-box strong.bonus-max {
+  color: #8e41ff;
+  text-shadow: 0 0 14px rgba(143, 66, 255, 0.5);
+  transform: scale(1.08);
 }
 
 .score-box span {
