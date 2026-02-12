@@ -19,12 +19,22 @@ const touch = {
   active: false,
 };
 
+const sound = createSoundEngine();
+
 highScoreElement.textContent = String(highScore);
 createBoardSkeleton();
 initGame();
 
-restartButton.addEventListener("click", initGame);
-retryButton.addEventListener("click", initGame);
+restartButton.addEventListener("click", () => {
+  sound.unlock();
+  sound.playUiTap();
+  initGame();
+});
+retryButton.addEventListener("click", () => {
+  sound.unlock();
+  sound.playUiTap();
+  initGame();
+});
 window.addEventListener("keydown", handleKeydown);
 boardElement.addEventListener("touchstart", onTouchStart, { passive: true });
 boardElement.addEventListener("touchend", onTouchEnd, { passive: true });
@@ -57,6 +67,8 @@ function createTile(level) {
 function handleKeydown(event) {
   if (isGameOver) return;
 
+  sound.unlock();
+
   const map = {
     ArrowUp: "up",
     ArrowDown: "down",
@@ -82,6 +94,7 @@ function handleKeydown(event) {
 function onTouchStart(event) {
   const [point] = event.changedTouches;
   if (!point) return;
+  sound.unlock();
   touch.active = true;
   touch.x = point.clientX;
   touch.y = point.clientY;
@@ -116,9 +129,18 @@ function takeTurn(direction) {
   const spawnedTile = spawnRandomTile();
   renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
 
+  sound.playMove();
+  if (spawnedTile) {
+    sound.playSpawn(spawnedTile.level);
+  }
+  if (mergedIds.size > 0) {
+    sound.playMerge(Math.min(mergedIds.size, 3));
+  }
+
   if (isBoardLocked(board)) {
     isGameOver = true;
     gameOverElement.classList.remove("hidden");
+    sound.playGameOver();
   }
 }
 
@@ -323,6 +345,129 @@ function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId =
       movingNodes.forEach((node) => node.classList.add("tile-moving-active"));
     });
   }
+}
+
+function createSoundEngine() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) {
+    return {
+      unlock() {},
+      playMove() {},
+      playSpawn() {},
+      playMerge() {},
+      playUiTap() {},
+      playGameOver() {},
+    };
+  }
+
+  const ctx = new AudioCtx();
+  const master = ctx.createGain();
+  master.gain.value = 0.12;
+  master.connect(ctx.destination);
+
+  function unlock() {
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
+  }
+
+  function blip({
+    freq = 420,
+    endFreq = 260,
+    duration = 0.12,
+    start = 0,
+    gain = 0.07,
+    type = "sine",
+    q = 8,
+  }) {
+    const now = ctx.currentTime + start;
+    const osc = ctx.createOscillator();
+    const amp = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), now + duration);
+
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(1600, now);
+    filter.frequency.exponentialRampToValueAtTime(450, now + duration);
+    filter.Q.value = q;
+
+    amp.gain.setValueAtTime(0.0001, now);
+    amp.gain.exponentialRampToValueAtTime(gain, now + duration * 0.18);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(filter);
+    filter.connect(amp);
+    amp.connect(master);
+
+    osc.start(now);
+    osc.stop(now + duration + 0.02);
+  }
+
+  function noiseSplash({ duration = 0.08, start = 0, gain = 0.02 }) {
+    const now = ctx.currentTime + start;
+    const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    }
+
+    const src = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const amp = ctx.createGain();
+
+    src.buffer = buffer;
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(820, now);
+    filter.Q.value = 0.9;
+
+    amp.gain.setValueAtTime(gain, now);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    src.connect(filter);
+    filter.connect(amp);
+    amp.connect(master);
+
+    src.start(now);
+  }
+
+  function playMove() {
+    blip({ freq: 560, endFreq: 330, duration: 0.11, gain: 0.04, type: "triangle", q: 3 });
+    noiseSplash({ duration: 0.05, start: 0.01, gain: 0.012 });
+  }
+
+  function playSpawn(level = 1) {
+    const pitch = 520 + level * 22;
+    blip({ freq: pitch, endFreq: pitch * 0.78, duration: 0.1, gain: 0.028, type: "sine", q: 4 });
+  }
+
+  function playMerge(intensity = 1) {
+    const base = 290 + intensity * 38;
+    blip({ freq: base, endFreq: base * 0.55, duration: 0.17, gain: 0.07, type: "triangle", q: 10 });
+    blip({ freq: base * 1.6, endFreq: base * 0.9, duration: 0.12, gain: 0.04, start: 0.018, type: "sine", q: 6 });
+    noiseSplash({ duration: 0.1, start: 0.016, gain: 0.015 });
+  }
+
+  function playUiTap() {
+    blip({ freq: 620, endFreq: 400, duration: 0.08, gain: 0.025, type: "sine", q: 2 });
+  }
+
+  function playGameOver() {
+    blip({ freq: 260, endFreq: 120, duration: 0.26, gain: 0.055, type: "sawtooth", q: 4 });
+  }
+
+  return {
+    unlock,
+    playMove,
+    playSpawn,
+    playMerge,
+    playUiTap,
+    playGameOver,
+  };
 }
 
 window.addEventListener("resize", () => renderBoard());
