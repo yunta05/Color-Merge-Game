@@ -5,6 +5,7 @@ const SCOREBOARD_KEY = "color-merge-scoreboard";
 const SCOREBOARD_SIZE = 10;
 
 const boardElement = document.getElementById("board");
+const scorePopupsElement = document.getElementById("score-popups");
 const scoreElement = document.getElementById("score");
 const highScoreElement = document.getElementById("high-score");
 const speedBonusElement = document.getElementById("speed-bonus");
@@ -142,7 +143,11 @@ function takeTurn(direction) {
   const speedBonus = calculateSpeedBonus(remainingMs);
 
   board = nextBoard;
-  updateScore(gainedScore + speedBonus);
+  const turnGain = gainedScore + speedBonus;
+  updateScore(turnGain);
+  if (turnGain > 0 && mergedLevels.length > 0) {
+    showScorePopup(turnGain);
+  }
 
   const spawnedTile = spawnRandomTile();
   renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
@@ -190,6 +195,32 @@ function updateSpeedBonusDisplay(remainingMs) {
   } else if (multiplier >= 1.7) {
     speedBonusElement.classList.add("bonus-mid");
   }
+}
+
+function showScorePopup(points) {
+  if (!scorePopupsElement || points <= 0) return;
+
+  const popup = document.createElement("div");
+  popup.className = "score-popup";
+  popup.textContent = `+${points}`;
+
+  if (points >= 700) {
+    popup.classList.add("score-popup-epic");
+  } else if (points >= 320) {
+    popup.classList.add("score-popup-high");
+  } else if (points >= 140) {
+    popup.classList.add("score-popup-mid");
+  }
+
+  scorePopupsElement.appendChild(popup);
+
+  requestAnimationFrame(() => {
+    popup.classList.add("score-popup-active");
+  });
+
+  popup.addEventListener("animationend", () => {
+    popup.remove();
+  }, { once: true });
 }
 
 function move(source, direction) {
