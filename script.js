@@ -1,532 +1,268 @@
-const SIZE = 4;
-const TURN_LIMIT_MS = 2000;
-const STORAGE_KEY = "color-merge-high-score";
-const SCOREBOARD_KEY = "color-merge-scoreboard";
-const SCOREBOARD_SIZE = 10;
-
-const boardElement = document.getElementById("board");
-const scoreElement = document.getElementById("score");
-const highScoreElement = document.getElementById("high-score");
-const speedBonusElement = document.getElementById("speed-bonus");
-const turnGaugeFillElement = document.getElementById("turn-gauge-fill");
-const highScoreListElement = document.getElementById("high-score-list");
-const gameOverElement = document.getElementById("game-over");
-const gameOverTextElement = document.getElementById("game-over-text");
-const restartButton = document.getElementById("restart-btn");
-const retryButton = document.getElementById("retry-btn");
-
-let board = [];
-let score = 0;
-let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
-let scoreBoard = loadScoreBoard();
-let isGameOver = false;
-let nextTileId = 1;
-let turnDeadline = 0;
-let timerRaf = 0;
-
-const touch = {
-  x: 0,
-  y: 0,
-  active: false,
-};
-
-const sound = createSoundEngine();
-
-highScoreElement.textContent = String(highScore);
-createBoardSkeleton();
-renderScoreBoard();
-initGame();
-
-restartButton.addEventListener("click", () => {
-  sound.unlock();
-  sound.playUiTap();
-  initGame();
-});
-retryButton.addEventListener("click", () => {
-  sound.unlock();
-  sound.playUiTap();
-  initGame();
-});
-window.addEventListener("keydown", handleKeydown);
-boardElement.addEventListener("touchstart", onTouchStart, { passive: true });
-boardElement.addEventListener("touchend", onTouchEnd, { passive: true });
-
-function createBoardSkeleton() {
-  for (let i = 0; i < SIZE * SIZE; i += 1) {
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    boardElement.appendChild(cell);
-  }
+:root {
+  --bg: #f4f2ee;
+  --panel: #ffffff;
+  --ink: #222222;
+  --muted: #6e6a65;
+  --board: #c7bfb6;
+  --empty: rgba(255, 255, 255, 0.32);
+  --tile-size: min(18vw, 90px);
+  --gap: min(2vw, 10px);
 }
 
-function initGame() {
-  board = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
-  score = 0;
-  isGameOver = false;
-  updateScore(0);
-  gameOverTextElement.textContent = "ゲームオーバー";
-  gameOverElement.classList.add("hidden");
-  spawnRandomTile();
-  spawnRandomTile();
-  renderBoard();
-  resetTurnTimer();
+* {
+  box-sizing: border-box;
 }
 
-function createTile(level) {
-  const tile = { id: nextTileId, level };
-  nextTileId += 1;
-  return tile;
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 20% 20%, #ffffff, var(--bg));
+  color: var(--ink);
+  font-family: "Inter", "Noto Sans JP", system-ui, -apple-system, sans-serif;
 }
 
-function handleKeydown(event) {
-  if (isGameOver) return;
-
-  sound.unlock();
-
-  const map = {
-    ArrowUp: "up",
-    ArrowDown: "down",
-    ArrowLeft: "left",
-    ArrowRight: "right",
-    w: "up",
-    a: "left",
-    s: "down",
-    d: "right",
-    W: "up",
-    A: "left",
-    S: "down",
-    D: "right",
-  };
-
-  const dir = map[event.key];
-  if (!dir) return;
-
-  event.preventDefault();
-  takeTurn(dir);
+.game-wrapper {
+  width: min(92vw, 460px);
+  display: grid;
+  gap: 14px;
 }
 
-function onTouchStart(event) {
-  const [point] = event.changedTouches;
-  if (!point) return;
-  sound.unlock();
-  touch.active = true;
-  touch.x = point.clientX;
-  touch.y = point.clientY;
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
-function onTouchEnd(event) {
-  if (!touch.active || isGameOver) return;
-  const [point] = event.changedTouches;
-  if (!point) return;
-
-  const dx = point.clientX - touch.x;
-  const dy = point.clientY - touch.y;
-  touch.active = false;
-
-  const absX = Math.abs(dx);
-  const absY = Math.abs(dy);
-  if (Math.max(absX, absY) < 30) return;
-
-  if (absX > absY) {
-    takeTurn(dx > 0 ? "right" : "left");
-    return;
-  }
-  takeTurn(dy > 0 ? "down" : "up");
+h1 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  margin: 0;
 }
 
-function takeTurn(direction) {
-  const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels } = move(board, direction);
-  if (!moved) return;
-
-  const remainingMs = Math.max(turnDeadline - performance.now(), 0);
-  const speedBonus = calculateSpeedBonus(remainingMs);
-
-  board = nextBoard;
-  updateScore(gainedScore + speedBonus);
-
-  const spawnedTile = spawnRandomTile();
-  renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
-
-  sound.playMove();
-  if (spawnedTile) sound.playSpawn(spawnedTile.level);
-
-  if (mergedLevels.length > 0) {
-    mergedLevels
-      .slice()
-      .sort((a, b) => a - b)
-      .forEach((level, index) => {
-        const tileValue = 2 ** level;
-        sound.playMergeSound(tileValue, index + 1);
-      });
-  }
-
-  if (isBoardLocked(board)) {
-    finishGame("ゲームオーバー");
-    return;
-  }
-
-  resetTurnTimer();
+.subtitle,
+.controls {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
-function speedMultiplierByRemaining(remainingMs) {
-  const ratio = Math.min(Math.max(remainingMs / TURN_LIMIT_MS, 0), 1);
-  return 1 + ratio * 2; // x1.00 ~ x3.00
+.restart-btn {
+  border: none;
+  border-radius: 10px;
+  background: #635b52;
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-function calculateSpeedBonus(remainingMs) {
-  const multiplier = speedMultiplierByRemaining(remainingMs);
-  return Math.floor((multiplier - 1) * 40);
+.scoreboard {
+  display: flex;
+  gap: 10px;
 }
 
-function updateSpeedBonusDisplay(remainingMs) {
-  const multiplier = speedMultiplierByRemaining(remainingMs);
-  speedBonusElement.textContent = `x${multiplier.toFixed(2)}`;
-  speedBonusElement.classList.remove("bonus-mid", "bonus-high", "bonus-max");
-
-  if (multiplier >= 2.7) {
-    speedBonusElement.classList.add("bonus-max");
-  } else if (multiplier >= 2.3) {
-    speedBonusElement.classList.add("bonus-high");
-  } else if (multiplier >= 1.7) {
-    speedBonusElement.classList.add("bonus-mid");
-  }
+.score-box {
+  flex: 1;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
-function move(source, direction) {
-  const next = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
-  const motionMap = new Map();
-  const mergedIds = new Set();
-  const mergedLevels = [];
-  let moved = false;
-  let gainedScore = 0;
-
-  for (let index = 0; index < SIZE; index += 1) {
-    const line = readLine(source, direction, index).filter((entry) => entry.tile);
-    const mergedLine = [];
-
-    for (let i = 0; i < line.length; i += 1) {
-      const current = line[i];
-      const following = line[i + 1];
-
-      if (following && current.tile.level === following.tile.level) {
-        const mergedTile = createTile(current.tile.level + 1);
-        mergedLine.push({ tile: mergedTile, from: current.pos });
-        mergedIds.add(mergedTile.id);
-        mergedLevels.push(mergedTile.level);
-        gainedScore += scoreByLevel(mergedTile.level);
-        i += 1;
-      } else {
-        mergedLine.push({ tile: current.tile, from: current.pos });
-      }
-    }
-
-    while (mergedLine.length < SIZE) {
-      mergedLine.push({ tile: null, from: null });
-    }
-
-    writeLine(next, direction, index, mergedLine, motionMap);
-  }
-
-  for (const motion of motionMap.values()) {
-    if (motion.from.row !== motion.to.row || motion.from.col !== motion.to.col || mergedIds.has(motion.id)) {
-      moved = true;
-      break;
-    }
-  }
-
-  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds, mergedLevels };
+.timer-box strong {
+  color: #2a6666;
+  transition: color 120ms ease, text-shadow 120ms ease, transform 120ms ease;
 }
 
-function readLine(source, direction, index) {
-  const values = [];
-  for (let pos = 0; pos < SIZE; pos += 1) {
-    const [r, c] = positionFor(direction, index, pos);
-    values.push({ tile: source[r][c], pos: { row: r, col: c } });
-  }
-  return values;
+.timer-box strong.bonus-mid {
+  color: #d0841e;
+  text-shadow: 0 0 10px rgba(237, 150, 42, 0.28);
 }
 
-function writeLine(target, direction, index, line, motionMap) {
-  for (let pos = 0; pos < SIZE; pos += 1) {
-    const [r, c] = positionFor(direction, index, pos);
-    const item = line[pos];
-    target[r][c] = item.tile;
-
-    if (item.tile && item.from) {
-      motionMap.set(item.tile.id, {
-        id: item.tile.id,
-        from: item.from,
-        to: { row: r, col: c },
-      });
-    }
-  }
+.timer-box strong.bonus-high {
+  color: #de4e95;
+  text-shadow: 0 0 12px rgba(225, 70, 136, 0.38);
+  transform: scale(1.05);
 }
 
-function positionFor(direction, index, pos) {
-  switch (direction) {
-    case "left": return [index, pos];
-    case "right": return [index, SIZE - 1 - pos];
-    case "up": return [pos, index];
-    case "down": return [SIZE - 1 - pos, index];
-    default: return [index, pos];
-  }
+.timer-box strong.bonus-max {
+  color: #8e41ff;
+  text-shadow: 0 0 14px rgba(143, 66, 255, 0.5);
+  transform: scale(1.08);
 }
 
-function spawnRandomTile() {
-  const empties = [];
-  for (let r = 0; r < SIZE; r += 1) {
-    for (let c = 0; c < SIZE; c += 1) {
-      if (!board[r][c]) empties.push([r, c]);
-    }
-  }
-
-  if (!empties.length) return null;
-
-  const [row, col] = empties[Math.floor(Math.random() * empties.length)];
-  const tile = createTile(Math.random() < 0.9 ? 1 : 2);
-  board[row][col] = tile;
-  return tile;
+.score-box span {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
-function isBoardLocked(state) {
-  for (let r = 0; r < SIZE; r += 1) {
-    for (let c = 0; c < SIZE; c += 1) {
-      const tile = state[r][c];
-      if (!tile) return false;
-      const neighbors = [[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]];
-      for (const [nr, nc] of neighbors) {
-        if (nr < 0 || nr >= SIZE || nc < 0 || nc >= SIZE) continue;
-        const neighbor = state[nr][nc];
-        if (neighbor && neighbor.level === tile.level) return false;
-      }
-    }
-  }
-  return true;
+.score-box strong {
+  font-size: 1.2rem;
 }
 
-function updateScore(delta) {
-  score += delta;
-  scoreElement.textContent = String(score);
-  if (score > highScore) {
-    highScore = score;
-    localStorage.setItem(STORAGE_KEY, String(highScore));
-    highScoreElement.textContent = String(highScore);
-  }
+.turn-gauge {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #d9d4cd;
+  overflow: hidden;
 }
 
-function scoreByLevel(level) {
-  return 2 ** level;
+.turn-gauge-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #3ec7cb, #3ba357 85%);
+  transform-origin: left center;
+  transition: transform 90ms linear, background-color 90ms linear;
 }
 
-function colorForLevel(level) {
-  const hue = (210 + level * 29) % 360;
-  const saturation = 72;
-  const lightness = Math.max(38, 72 - level * 4);
-  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+.board-wrap {
+  position: relative;
 }
 
-function getTileStep() {
-  const styles = getComputedStyle(boardElement);
-  const gap = Number.parseFloat(styles.gap) || 0;
-  const tile = boardElement.querySelector(".cell")?.clientWidth || 0;
-  return tile + gap;
+.board {
+  position: relative;
+  background: var(--board);
+  border-radius: 14px;
+  padding: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
+  touch-action: none;
 }
 
-function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId = null } = {}) {
-  const oldLayer = boardElement.querySelector(".tile-layer");
-  if (oldLayer) oldLayer.remove();
-
-  const tileLayer = document.createElement("div");
-  tileLayer.className = "tile-layer";
-
-  const movingNodes = [];
-  const step = getTileStep();
-
-  for (let r = 0; r < SIZE; r += 1) {
-    for (let c = 0; c < SIZE; c += 1) {
-      const tile = board[r][c];
-      if (!tile) continue;
-
-      const node = document.createElement("div");
-      node.className = "tile";
-      node.textContent = String(tile.level);
-      node.style.backgroundColor = colorForLevel(tile.level);
-      node.style.gridRow = String(r + 1);
-      node.style.gridColumn = String(c + 1);
-
-      const motion = motionMap.get(tile.id);
-      if (motion) {
-        const dx = (motion.from.col - motion.to.col) * step;
-        const dy = (motion.from.row - motion.to.row) * step;
-        if (dx !== 0 || dy !== 0) {
-          node.classList.add("tile-moving");
-          node.style.setProperty("--from-x", `${dx}px`);
-          node.style.setProperty("--from-y", `${dy}px`);
-          movingNodes.push(node);
-        }
-      }
-
-      if (mergedIds.has(tile.id)) node.classList.add("tile-merged");
-      if (spawnedId && tile.id === spawnedId) node.classList.add("tile-spawned");
-      tileLayer.appendChild(node);
-    }
-  }
-
-  boardElement.appendChild(tileLayer);
-
-  if (movingNodes.length) {
-    requestAnimationFrame(() => {
-      movingNodes.forEach((node) => node.classList.add("tile-moving-active"));
-    });
-  }
+.cell {
+  border-radius: 10px;
+  background: var(--empty);
 }
 
-function resetTurnTimer() {
-  turnDeadline = performance.now() + TURN_LIMIT_MS;
-  if (timerRaf) cancelAnimationFrame(timerRaf);
-  tickTurnTimer();
+.tile-layer {
+  position: absolute;
+  inset: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
+  pointer-events: none;
 }
 
-function tickTurnTimer() {
-  if (isGameOver) return;
-
-  const remainingMs = turnDeadline - performance.now();
-  if (remainingMs <= 0) {
-    updateSpeedBonusDisplay(0);
-    turnGaugeFillElement.style.transform = "scaleX(0)";
-    finishGame("タイムアップ");
-    return;
-  }
-
-  const ratio = remainingMs / TURN_LIMIT_MS;
-  updateSpeedBonusDisplay(remainingMs);
-  turnGaugeFillElement.style.transform = `scaleX(${ratio})`;
-
-  if (ratio > 0.5) {
-    turnGaugeFillElement.style.background = "linear-gradient(90deg, #3ec7cb, #3ba357 85%)";
-  } else if (ratio > 0.25) {
-    turnGaugeFillElement.style.background = "linear-gradient(90deg, #f2bc46, #e6942a 85%)";
-  } else {
-    turnGaugeFillElement.style.background = "linear-gradient(90deg, #ef6b5a, #c44444 85%)";
-  }
-
-  timerRaf = requestAnimationFrame(tickTurnTimer);
+.tile {
+  --from-x: 0px;
+  --from-y: 0px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 3px rgba(8, 20, 33, 0.4);
+  box-shadow: 0 8px 16px rgba(10, 36, 64, 0.26), inset 0 -6px 12px rgba(255, 255, 255, 0.14);
+  transform: translate(0, 0) scale(1);
+  will-change: transform, filter;
 }
 
-function finishGame(reason) {
-  if (isGameOver) return;
-  isGameOver = true;
-  if (timerRaf) cancelAnimationFrame(timerRaf);
-  gameOverTextElement.textContent = reason;
-  gameOverElement.classList.remove("hidden");
-  registerScore(score);
-  renderScoreBoard();
-  sound.playGameOver();
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 6% 10% 44% 10%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0));
+  opacity: 0.75;
+  pointer-events: none;
 }
 
-function loadScoreBoard() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SCOREBOARD_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((n) => Number.isFinite(n)) : [];
-  } catch {
-    return [];
-  }
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  pointer-events: none;
 }
 
-function registerScore(value) {
-  if (!Number.isFinite(value) || value <= 0) return;
-  scoreBoard = [...scoreBoard, Math.floor(value)]
-    .sort((a, b) => b - a)
-    .slice(0, SCOREBOARD_SIZE);
-  localStorage.setItem(SCOREBOARD_KEY, JSON.stringify(scoreBoard));
+.tile-moving {
+  transform: translate(var(--from-x), var(--from-y)) scale(0.985);
+  filter: saturate(1.08) brightness(1.04);
 }
 
-function renderScoreBoard() {
-  highScoreListElement.innerHTML = "";
-  if (scoreBoard.length === 0) {
-    const li = document.createElement("li");
-    li.textContent = "まだ記録がありません";
-    highScoreListElement.appendChild(li);
-    return;
-  }
-
-  scoreBoard.forEach((value, index) => {
-    const li = document.createElement("li");
-    li.textContent = `${index + 1}. ${value}`;
-    highScoreListElement.appendChild(li);
-  });
+.tile-moving-active {
+  transition: transform 260ms cubic-bezier(0.17, 0.84, 0.22, 1.04), filter 260ms ease;
+  transform: translate(0, 0) scale(1);
+  filter: saturate(1) brightness(1);
 }
 
-function createSoundEngine() {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-
-  if (!AudioCtx) {
-    return {
-      unlock() {}, playMove() {}, playSpawn() {}, playMergeSound() {}, playUiTap() {}, playGameOver() {},
-    };
-  }
-
-  let ctx = null;
-  let master = null;
-
-  function ensureContext() {
-    if (ctx) return true;
-    try {
-      ctx = new AudioCtx();
-      master = ctx.createGain();
-      master.gain.value = 0.45;
-      master.connect(ctx.destination);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function unlock() {
-    if (!ensureContext()) return;
-    if (ctx.state === "suspended") ctx.resume();
-  }
-
-  function withAudio(callback) {
-    if (!ensureContext()) return;
-    if (ctx.state === "running") {
-      callback();
-      return;
-    }
-    ctx.resume().then(() => callback()).catch(() => {});
-  }
-
-  function click(freq, gain, start = 0, duration = 0.03) {
-    const now = ctx.currentTime + start;
-    const osc = ctx.createOscillator();
-    const amp = ctx.createGain();
-    osc.type = "square";
-    osc.frequency.setValueAtTime(freq, now);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(120, freq * 0.5), now + duration);
-    amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.exponentialRampToValueAtTime(gain, now + 0.002);
-    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    osc.connect(amp);
-    amp.connect(master);
-    osc.start(now);
-    osc.stop(now + duration + 0.01);
-  }
-
-  return {
-    unlock,
-    playMove() { withAudio(() => click(1700, 0.06)); },
-    playSpawn(level = 1) { withAudio(() => click(1750 + level * 30, 0.06)); },
-    playMergeSound(tileValue, chainCount = 1) {
-      withAudio(() => {
-        const step = Math.max(1, Math.round(Math.log2(Math.max(2, tileValue))));
-        const base = 1500 + step * 60 + chainCount * 40;
-        click(base, Math.min(0.08 + step * 0.003, 0.15), 0, 0.034);
-        click(base * 1.2, 0.055, 0.014, 0.028);
-      });
-    },
-    playUiTap() { withAudio(() => click(1850, 0.05, 0, 0.025)); },
-    playGameOver() { withAudio(() => click(900, 0.08, 0, 0.06)); },
-  };
+.tile-spawned {
+  animation: droplet-pop 230ms cubic-bezier(0.16, 0.86, 0.34, 1.2);
 }
 
-window.addEventListener("resize", () => renderBoard());
+.tile-merged {
+  animation: syrup-merge 360ms cubic-bezier(0.18, 0.89, 0.22, 1.15);
+}
+
+@keyframes droplet-pop {
+  0% { opacity: 0; transform: translateY(5px) scale(0.72, 1.24); filter: saturate(1.25) brightness(1.14); }
+  55% { opacity: 1; transform: translateY(-2px) scale(1.06, 0.95); }
+  100% { transform: translateY(0) scale(1, 1); filter: saturate(1) brightness(1); }
+}
+
+@keyframes syrup-merge {
+  0% { transform: scale(1.22, 0.78); filter: brightness(1.24) saturate(1.35); box-shadow: 0 0 0 rgba(255, 255, 255, 0.55), 0 8px 16px rgba(10, 36, 64, 0.26); }
+  28% { transform: scale(0.86, 1.2); }
+  54% { transform: scale(1.09, 0.93); box-shadow: 0 0 24px rgba(255, 255, 255, 0.38), 0 8px 16px rgba(10, 36, 64, 0.26); }
+  100% { transform: scale(1, 1); filter: brightness(1) saturate(1); box-shadow: 0 8px 16px rgba(10, 36, 64, 0.26), inset 0 -6px 12px rgba(255, 255, 255, 0.14); }
+}
+
+.ranking {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.ranking h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.ranking ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.ranking li {
+  font-weight: 700;
+  color: #4d4740;
+}
+
+.game-over {
+  position: absolute;
+  inset: 0;
+  background: rgba(42, 36, 32, 0.78);
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  gap: 10px;
+  color: #fff;
+  text-align: center;
+}
+
+.game-over p { margin: 0; font-size: 1.4rem; font-weight: 800; }
+.hidden { display: none; }
+
+@media (max-width: 420px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .restart-btn { width: 100%; }
+  .scoreboard { flex-direction: column; }
+}
