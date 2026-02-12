@@ -362,14 +362,25 @@ function createSoundEngine() {
 
   let ctx = null;
   let master = null;
+  let compressor = null;
 
   function ensureContext() {
     if (ctx) return true;
     try {
       ctx = new AudioCtx();
+
+      compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -28;
+      compressor.knee.value = 22;
+      compressor.ratio.value = 5;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.16;
+
       master = ctx.createGain();
-      master.gain.value = 0.2;
-      master.connect(ctx.destination);
+      master.gain.value = 0.52;
+
+      master.connect(compressor);
+      compressor.connect(ctx.destination);
       return true;
     } catch (error) {
       return false;
@@ -399,7 +410,7 @@ function createSoundEngine() {
     ctx.resume().then(playNow).catch(() => {});
   }
 
-  function blip({
+  function tone({
     freq = 420,
     endFreq = 260,
     duration = 0.12,
@@ -407,41 +418,49 @@ function createSoundEngine() {
     gain = 0.07,
     type = "sine",
     q = 8,
+    pan = 0,
+    lowpassStart = 2200,
+    lowpassEnd = 520,
   }) {
     const now = ctx.currentTime + start;
     const osc = ctx.createOscillator();
     const amp = ctx.createGain();
     const filter = ctx.createBiquadFilter();
+    const panner = ctx.createStereoPanner();
 
     osc.type = type;
     osc.frequency.setValueAtTime(freq, now);
     osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), now + duration);
 
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(1800, now);
-    filter.frequency.exponentialRampToValueAtTime(480, now + duration);
+    filter.frequency.setValueAtTime(lowpassStart, now);
+    filter.frequency.exponentialRampToValueAtTime(lowpassEnd, now + duration);
     filter.Q.value = q;
 
+    panner.pan.setValueAtTime(pan, now);
+
     amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.exponentialRampToValueAtTime(gain, now + duration * 0.18);
+    amp.gain.exponentialRampToValueAtTime(gain, now + duration * 0.16);
     amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     osc.connect(filter);
     filter.connect(amp);
-    amp.connect(master);
+    amp.connect(panner);
+    panner.connect(master);
 
     osc.start(now);
     osc.stop(now + duration + 0.03);
   }
 
-  function noiseSplash({ duration = 0.08, start = 0, gain = 0.02 }) {
+  function splash({ duration = 0.08, start = 0, gain = 0.02, freq = 760 }) {
     const now = ctx.currentTime + start;
     const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
     const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
     const data = buffer.getChannelData(0);
 
     for (let i = 0; i < length; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+      const decay = 1 - i / length;
+      data[i] = (Math.random() * 2 - 1) * decay * decay;
     }
 
     const src = ctx.createBufferSource();
@@ -450,8 +469,8 @@ function createSoundEngine() {
 
     src.buffer = buffer;
     filter.type = "bandpass";
-    filter.frequency.setValueAtTime(820, now);
-    filter.Q.value = 0.9;
+    filter.frequency.setValueAtTime(freq, now);
+    filter.Q.value = 1.25;
 
     amp.gain.setValueAtTime(gain, now);
     amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
@@ -465,36 +484,41 @@ function createSoundEngine() {
 
   function playMove() {
     withAudio(() => {
-      blip({ freq: 560, endFreq: 330, duration: 0.11, gain: 0.05, type: "triangle", q: 3 });
-      noiseSplash({ duration: 0.05, start: 0.01, gain: 0.015 });
+      tone({ freq: 520, endFreq: 290, duration: 0.12, gain: 0.09, type: "triangle", q: 4, pan: -0.05 });
+      tone({ freq: 760, endFreq: 420, duration: 0.08, start: 0.012, gain: 0.05, type: "sine", q: 6, pan: 0.04 });
+      splash({ duration: 0.05, start: 0.015, gain: 0.025, freq: 840 });
     });
   }
 
   function playSpawn(level = 1) {
     withAudio(() => {
-      const pitch = 520 + level * 22;
-      blip({ freq: pitch, endFreq: pitch * 0.78, duration: 0.1, gain: 0.035, type: "sine", q: 4 });
+      const pitch = 590 + level * 28;
+      tone({ freq: pitch, endFreq: pitch * 0.8, duration: 0.11, gain: 0.065, type: "sine", q: 5, pan: 0.06 });
+      tone({ freq: pitch * 1.3, endFreq: pitch * 0.92, duration: 0.09, start: 0.01, gain: 0.03, type: "triangle", q: 4, pan: -0.06 });
     });
   }
 
   function playMerge(intensity = 1) {
     withAudio(() => {
-      const base = 290 + intensity * 38;
-      blip({ freq: base, endFreq: base * 0.55, duration: 0.17, gain: 0.085, type: "triangle", q: 10 });
-      blip({ freq: base * 1.6, endFreq: base * 0.9, duration: 0.12, gain: 0.05, start: 0.018, type: "sine", q: 6 });
-      noiseSplash({ duration: 0.1, start: 0.016, gain: 0.018 });
+      const size = Math.max(1, intensity);
+      const base = 240 + size * 48;
+      tone({ freq: base, endFreq: base * 0.5, duration: 0.2, gain: 0.14, type: "triangle", q: 11, pan: -0.08, lowpassStart: 1900, lowpassEnd: 380 });
+      tone({ freq: base * 1.5, endFreq: base * 0.95, duration: 0.14, start: 0.014, gain: 0.09, type: "sine", q: 8, pan: 0.08, lowpassStart: 2400, lowpassEnd: 700 });
+      tone({ freq: base * 1.08, endFreq: base * 0.66, duration: 0.12, start: 0.028, gain: 0.08, type: "square", q: 5, pan: 0 });
+      splash({ duration: 0.12, start: 0.02, gain: 0.038, freq: 720 + size * 55 });
     });
   }
 
   function playUiTap() {
     withAudio(() => {
-      blip({ freq: 620, endFreq: 400, duration: 0.08, gain: 0.03, type: "sine", q: 2 });
+      tone({ freq: 700, endFreq: 440, duration: 0.08, gain: 0.05, type: "sine", q: 3 });
     });
   }
 
   function playGameOver() {
     withAudio(() => {
-      blip({ freq: 260, endFreq: 120, duration: 0.26, gain: 0.06, type: "sawtooth", q: 4 });
+      tone({ freq: 280, endFreq: 115, duration: 0.3, gain: 0.095, type: "sawtooth", q: 5, lowpassStart: 1700, lowpassEnd: 260 });
+      splash({ duration: 0.14, start: 0.03, gain: 0.025, freq: 520 });
     });
   }
 
