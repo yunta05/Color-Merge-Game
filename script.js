@@ -492,7 +492,29 @@ function createSoundEngine() {
     return base * (2 ** octave);
   }
 
-  function playPianoNote(freq, { start = 0, gain = 0.12 } = {}) {
+  function semitone(baseFreq, offset) {
+    return baseFreq * (2 ** (offset / 12));
+  }
+
+  function chordFrequenciesForLevel(level) {
+    const base = pianoFrequencyForLevel(level);
+
+    if (level <= 2) {
+      return [base, semitone(base, 4), semitone(base, 7)];
+    }
+    if (level <= 4) {
+      return [base, semitone(base, 4), semitone(base, 7), semitone(base, 11)];
+    }
+    if (level <= 6) {
+      return [base, semitone(base, 3), semitone(base, 7), semitone(base, 10), semitone(base, 14)];
+    }
+    if (level <= 8) {
+      return [base, semitone(base, 4), semitone(base, 7), semitone(base, 11), semitone(base, 14), semitone(base, 18)];
+    }
+    return [base, semitone(base, 4), semitone(base, 7), semitone(base, 11), semitone(base, 14), semitone(base, 18), semitone(base, 21)];
+  }
+
+  function playPianoNote(freq, { start = 0, gain = 0.12, duration = 0.42 } = {}) {
     const now = ctx.currentTime + start;
     const amp = ctx.createGain();
     const low = ctx.createOscillator();
@@ -514,8 +536,8 @@ function createSoundEngine() {
 
     amp.gain.setValueAtTime(0.0001, now);
     amp.gain.exponentialRampToValueAtTime(gain, now + 0.012);
-    amp.gain.exponentialRampToValueAtTime(gain * 0.35, now + 0.08);
-    amp.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+    amp.gain.exponentialRampToValueAtTime(gain * 0.35, now + Math.min(0.1, duration * 0.28));
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     low.connect(lp);
     mid.connect(lp);
@@ -526,9 +548,9 @@ function createSoundEngine() {
     low.start(now);
     mid.start(now);
     high.start(now);
-    low.stop(now + 0.45);
-    mid.stop(now + 0.45);
-    high.stop(now + 0.45);
+    low.stop(now + duration + 0.03);
+    mid.stop(now + duration + 0.03);
+    high.stop(now + duration + 0.03);
   }
 
   function playMove() {
@@ -557,15 +579,43 @@ function createSoundEngine() {
   function playMergeNotes(levels = []) {
     withAudio(() => {
       const sorted = [...levels].sort((a, b) => a - b);
-      sorted.forEach((level, i) => {
-        const freq = pianoFrequencyForLevel(level);
-        playPianoNote(freq, { start: i * 0.07, gain: 0.13 - Math.min(i * 0.01, 0.04) });
-      });
+      let cursor = 0;
 
-      const highest = sorted[sorted.length - 1];
-      if (highest) {
-        splash({ duration: 0.06, start: sorted.length * 0.06, gain: 0.018, freq: 900 });
-      }
+      sorted.forEach((level, mergeIndex) => {
+        const chord = chordFrequenciesForLevel(level);
+        const sparkle = Math.min(Math.max(level - 5, 0), 4);
+        const baseGain = Math.min(0.1 + level * 0.01, 0.2);
+        const noteDuration = Math.min(0.34 + level * 0.018, 0.58);
+
+        chord.forEach((freq, chordIndex) => {
+          const stagger = chordIndex * 0.016;
+          const gainScale = 1 - Math.min(chordIndex * 0.1, 0.42);
+          playPianoNote(freq, {
+            start: cursor + stagger,
+            gain: baseGain * gainScale,
+            duration: noteDuration,
+          });
+        });
+
+        for (let i = 0; i < sparkle; i += 1) {
+          const high = semitone(chord[0], 12 + i * 3);
+          playPianoNote(high, {
+            start: cursor + 0.05 + i * 0.03,
+            gain: 0.055,
+            duration: 0.2,
+          });
+        }
+
+        const splashGain = Math.min(0.014 + level * 0.0022, 0.04);
+        splash({
+          duration: Math.min(0.06 + level * 0.005, 0.12),
+          start: cursor + 0.02,
+          gain: splashGain,
+          freq: 760 + Math.min(level * 35, 420),
+        });
+
+        cursor += 0.09 + Math.min(level * 0.005, 0.04) + mergeIndex * 0.004;
+      });
     });
   }
 
