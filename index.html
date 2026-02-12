@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Color Merge Game</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="game-wrapper">
+    <header class="topbar">
+      <div>
+        <h1>Color Merge Game</h1>
+        <p class="subtitle">色タイルを合体させてハイスコアを目指そう</p>
+      </div>
+      <button id="restart-btn" class="restart-btn" type="button">リスタート</button>
+    </header>
+
+    <section class="scoreboard" aria-label="スコア情報">
+      <div class="score-box">
+        <span>スコア</span>
+        <strong id="score">0</strong>
+      </div>
+      <div class="score-box">
+        <span>ハイスコア</span>
+        <strong id="high-score">0</strong>
+      </div>
+    </section>
+
+    <section class="board-wrap">
+      <div id="board" class="board" aria-label="ゲーム盤面" role="grid"></div>
+      <div id="game-over" class="game-over hidden" aria-live="polite">
+        <p>ゲームオーバー</p>
+        <button id="retry-btn" class="restart-btn" type="button">もう一度</button>
+      </div>
+    </section>
+
+    <p class="controls">操作: 矢印キー / WASD / スワイプ</p>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
