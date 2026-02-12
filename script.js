@@ -1,17 +1,28 @@
 const SIZE = 4;
+const TURN_LIMIT_MS = 2000;
 const STORAGE_KEY = "color-merge-high-score";
+const SCOREBOARD_KEY = "color-merge-scoreboard";
+const SCOREBOARD_SIZE = 10;
+
 const boardElement = document.getElementById("board");
 const scoreElement = document.getElementById("score");
 const highScoreElement = document.getElementById("high-score");
+const turnTimerElement = document.getElementById("turn-timer");
+const turnGaugeFillElement = document.getElementById("turn-gauge-fill");
+const highScoreListElement = document.getElementById("high-score-list");
 const gameOverElement = document.getElementById("game-over");
+const gameOverTextElement = document.getElementById("game-over-text");
 const restartButton = document.getElementById("restart-btn");
 const retryButton = document.getElementById("retry-btn");
 
 let board = [];
 let score = 0;
 let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
+let scoreBoard = loadScoreBoard();
 let isGameOver = false;
 let nextTileId = 1;
+let turnDeadline = 0;
+let timerRaf = 0;
 
 const touch = {
   x: 0,
@@ -23,6 +34,7 @@ const sound = createSoundEngine();
 
 highScoreElement.textContent = String(highScore);
 createBoardSkeleton();
+renderScoreBoard();
 initGame();
 
 restartButton.addEventListener("click", () => {
@@ -52,10 +64,12 @@ function initGame() {
   score = 0;
   isGameOver = false;
   updateScore(0);
+  gameOverTextElement.textContent = "ゲームオーバー";
   gameOverElement.classList.add("hidden");
   spawnRandomTile();
   spawnRandomTile();
   renderBoard();
+  resetTurnTimer();
 }
 
 function createTile(level) {
@@ -124,17 +138,19 @@ function takeTurn(direction) {
   const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels } = move(board, direction);
   if (!moved) return;
 
+  const remainingMs = Math.max(turnDeadline - performance.now(), 0);
+  const speedBonus = calculateSpeedBonus(remainingMs);
+
   board = nextBoard;
-  updateScore(gainedScore);
+  updateScore(gainedScore + speedBonus);
+
   const spawnedTile = spawnRandomTile();
   renderBoard({ motionMap, mergedIds, spawnedId: spawnedTile?.id });
 
   sound.playMove();
-  if (spawnedTile) {
-    sound.playSpawn(spawnedTile.level);
-  }
+  if (spawnedTile) sound.playSpawn(spawnedTile.level);
+
   if (mergedLevels.length > 0) {
-    // 1ターン内の連鎖数を段階的に渡して達成感を増幅する
     mergedLevels
       .slice()
       .sort((a, b) => a - b)
@@ -145,10 +161,16 @@ function takeTurn(direction) {
   }
 
   if (isBoardLocked(board)) {
-    isGameOver = true;
-    gameOverElement.classList.remove("hidden");
-    sound.playGameOver();
+    finishGame("ゲームオーバー");
+    return;
   }
+
+  resetTurnTimer();
+}
+
+function calculateSpeedBonus(remainingMs) {
+  const ratio = remainingMs / TURN_LIMIT_MS;
+  return Math.floor(40 * ratio * ratio);
 }
 
 function move(source, direction) {
@@ -169,18 +191,18 @@ function move(source, direction) {
 
       if (following && current.tile.level === following.tile.level) {
         const mergedTile = createTile(current.tile.level + 1);
-        mergedLine.push({ tile: mergedTile, from: current.pos, merged: true });
+        mergedLine.push({ tile: mergedTile, from: current.pos });
         mergedIds.add(mergedTile.id);
         mergedLevels.push(mergedTile.level);
         gainedScore += scoreByLevel(mergedTile.level);
         i += 1;
       } else {
-        mergedLine.push({ tile: current.tile, from: current.pos, merged: false });
+        mergedLine.push({ tile: current.tile, from: current.pos });
       }
     }
 
     while (mergedLine.length < SIZE) {
-      mergedLine.push({ tile: null, from: null, merged: false });
+      mergedLine.push({ tile: null, from: null });
     }
 
     writeLine(next, direction, index, mergedLine, motionMap);
@@ -223,16 +245,11 @@ function writeLine(target, direction, index, line, motionMap) {
 
 function positionFor(direction, index, pos) {
   switch (direction) {
-    case "left":
-      return [index, pos];
-    case "right":
-      return [index, SIZE - 1 - pos];
-    case "up":
-      return [pos, index];
-    case "down":
-      return [SIZE - 1 - pos, index];
-    default:
-      return [index, pos];
+    case "left": return [index, pos];
+    case "right": return [index, SIZE - 1 - pos];
+    case "up": return [pos, index];
+    case "down": return [SIZE - 1 - pos, index];
+    default: return [index, pos];
   }
 }
 
@@ -257,12 +274,7 @@ function isBoardLocked(state) {
     for (let c = 0; c < SIZE; c += 1) {
       const tile = state[r][c];
       if (!tile) return false;
-      const neighbors = [
-        [r + 1, c],
-        [r - 1, c],
-        [r, c + 1],
-        [r, c - 1],
-      ];
+      const neighbors = [[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]];
       for (const [nr, nc] of neighbors) {
         if (nr < 0 || nr >= SIZE || nc < 0 || nc >= SIZE) continue;
         const neighbor = state[nr][nc];
@@ -335,14 +347,8 @@ function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId =
         }
       }
 
-      if (mergedIds.has(tile.id)) {
-        node.classList.add("tile-merged");
-      }
-
-      if (spawnedId && tile.id === spawnedId) {
-        node.classList.add("tile-spawned");
-      }
-
+      if (mergedIds.has(tile.id)) node.classList.add("tile-merged");
+      if (spawnedId && tile.id === spawnedId) node.classList.add("tile-spawned");
       tileLayer.appendChild(node);
     }
   }
@@ -356,43 +362,103 @@ function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId =
   }
 }
 
+function resetTurnTimer() {
+  turnDeadline = performance.now() + TURN_LIMIT_MS;
+  if (timerRaf) cancelAnimationFrame(timerRaf);
+  tickTurnTimer();
+}
+
+function tickTurnTimer() {
+  if (isGameOver) return;
+
+  const remainingMs = turnDeadline - performance.now();
+  if (remainingMs <= 0) {
+    turnTimerElement.textContent = "0.00s";
+    turnGaugeFillElement.style.transform = "scaleX(0)";
+    finishGame("タイムアップ");
+    return;
+  }
+
+  const ratio = remainingMs / TURN_LIMIT_MS;
+  turnTimerElement.textContent = `${(remainingMs / 1000).toFixed(2)}s`;
+  turnGaugeFillElement.style.transform = `scaleX(${ratio})`;
+
+  if (ratio > 0.5) {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #3ec7cb, #3ba357 85%)";
+  } else if (ratio > 0.25) {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #f2bc46, #e6942a 85%)";
+  } else {
+    turnGaugeFillElement.style.background = "linear-gradient(90deg, #ef6b5a, #c44444 85%)";
+  }
+
+  timerRaf = requestAnimationFrame(tickTurnTimer);
+}
+
+function finishGame(reason) {
+  if (isGameOver) return;
+  isGameOver = true;
+  if (timerRaf) cancelAnimationFrame(timerRaf);
+  gameOverTextElement.textContent = reason;
+  gameOverElement.classList.remove("hidden");
+  registerScore(score);
+  renderScoreBoard();
+  sound.playGameOver();
+}
+
+function loadScoreBoard() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SCOREBOARD_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((n) => Number.isFinite(n)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function registerScore(value) {
+  if (!Number.isFinite(value) || value <= 0) return;
+  scoreBoard = [...scoreBoard, Math.floor(value)]
+    .sort((a, b) => b - a)
+    .slice(0, SCOREBOARD_SIZE);
+  localStorage.setItem(SCOREBOARD_KEY, JSON.stringify(scoreBoard));
+}
+
+function renderScoreBoard() {
+  highScoreListElement.innerHTML = "";
+  if (scoreBoard.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "まだ記録がありません";
+    highScoreListElement.appendChild(li);
+    return;
+  }
+
+  scoreBoard.forEach((value, index) => {
+    const li = document.createElement("li");
+    li.textContent = `${index + 1}. ${value}`;
+    highScoreListElement.appendChild(li);
+  });
+}
+
 function createSoundEngine() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
 
   if (!AudioCtx) {
     return {
-      unlock() {},
-      playMove() {},
-      playSpawn() {},
-      playMergeSound() {},
-      playUiTap() {},
-      playGameOver() {},
+      unlock() {}, playMove() {}, playSpawn() {}, playMergeSound() {}, playUiTap() {}, playGameOver() {},
     };
   }
 
   let ctx = null;
   let master = null;
-  let compressor = null;
 
   function ensureContext() {
     if (ctx) return true;
-
     try {
       ctx = new AudioCtx();
-      compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -22;
-      compressor.knee.value = 12;
-      compressor.ratio.value = 6;
-      compressor.attack.value = 0.002;
-      compressor.release.value = 0.08;
-
       master = ctx.createGain();
-      master.gain.value = 0.5;
-
-      master.connect(compressor);
-      compressor.connect(ctx.destination);
+      master.gain.value = 0.45;
+      master.connect(ctx.destination);
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -404,125 +470,43 @@ function createSoundEngine() {
 
   function withAudio(callback) {
     if (!ensureContext()) return;
-    const playNow = () => {
-      if (!ctx || ctx.state !== "running") return;
-      callback();
-    };
-
     if (ctx.state === "running") {
-      playNow();
+      callback();
       return;
     }
-
-    ctx.resume().then(playNow).catch(() => {});
+    ctx.resume().then(() => callback()).catch(() => {});
   }
 
-  // 全効果音の基本となる、硬質で短いクリック音
-  function playClick({
-    freq = 1800,
-    endFreq = 700,
-    gain = 0.07,
-    start = 0,
-    duration = 0.035,
-    q = 2.2,
-  } = {}) {
+  function click(freq, gain, start = 0, duration = 0.03) {
     const now = ctx.currentTime + start;
     const osc = ctx.createOscillator();
-    const filter = ctx.createBiquadFilter();
     const amp = ctx.createGain();
-
     osc.type = "square";
     osc.frequency.setValueAtTime(freq, now);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(80, endFreq), now + duration);
-
-    filter.type = "highpass";
-    filter.frequency.setValueAtTime(600, now);
-    filter.Q.value = q;
-
+    osc.frequency.exponentialRampToValueAtTime(Math.max(120, freq * 0.5), now + duration);
     amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.exponentialRampToValueAtTime(gain, now + 0.0025);
+    amp.gain.exponentialRampToValueAtTime(gain, now + 0.002);
     amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    osc.connect(filter);
-    filter.connect(amp);
+    osc.connect(amp);
     amp.connect(master);
-
     osc.start(now);
     osc.stop(now + duration + 0.01);
   }
 
-  function playMove() {
-    withAudio(() => {
-      playClick({ freq: 1700, endFreq: 760, gain: 0.055, duration: 0.03 });
-    });
-  }
-
-  function playSpawn(level = 1) {
-    withAudio(() => {
-      const lift = Math.min(level * 45, 260);
-      playClick({ freq: 1650 + lift, endFreq: 840 + lift * 0.3, gain: 0.06, duration: 0.032 });
-    });
-  }
-
-  // 既存ゲームロジックから呼ばれる API を維持
-  function playMergeSound(tileValue, chainCount = 1) {
-    withAudio(() => {
-      const step = Math.max(1, Math.round(Math.log2(Math.max(2, tileValue))));
-      const chain = Math.max(1, chainCount);
-
-      // 値と連鎖が上がるほど高く・少し強いクリックを重ねる
-      const baseFreq = 1500 + Math.min(step * 70, 900) + Math.min(chain * 35, 220);
-      const baseGain = Math.min(0.06 + step * 0.004 + chain * 0.003, 0.14);
-
-      playClick({
-        freq: baseFreq,
-        endFreq: baseFreq * 0.46,
-        gain: baseGain,
-        duration: 0.033,
-      });
-
-      // 連鎖感のための追従クリック
-      playClick({
-        freq: baseFreq * 1.22,
-        endFreq: baseFreq * 0.62,
-        gain: baseGain * 0.75,
-        start: 0.014,
-        duration: 0.028,
-      });
-
-      // 大きな値は3発目を追加（派手さは残しつつ全体はクリック系）
-      if (tileValue >= 128) {
-        playClick({
-          freq: baseFreq * 1.4,
-          endFreq: baseFreq * 0.76,
-          gain: baseGain * 0.62,
-          start: 0.03,
-          duration: 0.026,
-        });
-      }
-    });
-  }
-
-  function playUiTap() {
-    withAudio(() => {
-      playClick({ freq: 1850, endFreq: 980, gain: 0.05, duration: 0.026 });
-    });
-  }
-
-  function playGameOver() {
-    withAudio(() => {
-      playClick({ freq: 980, endFreq: 320, gain: 0.08, duration: 0.06, q: 1.2 });
-      playClick({ freq: 760, endFreq: 250, gain: 0.05, duration: 0.05, start: 0.035, q: 1.1 });
-    });
-  }
-
   return {
     unlock,
-    playMove,
-    playSpawn,
-    playMergeSound,
-    playUiTap,
-    playGameOver,
+    playMove() { withAudio(() => click(1700, 0.06)); },
+    playSpawn(level = 1) { withAudio(() => click(1750 + level * 30, 0.06)); },
+    playMergeSound(tileValue, chainCount = 1) {
+      withAudio(() => {
+        const step = Math.max(1, Math.round(Math.log2(Math.max(2, tileValue))));
+        const base = 1500 + step * 60 + chainCount * 40;
+        click(base, Math.min(0.08 + step * 0.003, 0.15), 0, 0.034);
+        click(base * 1.2, 0.055, 0.014, 0.028);
+      });
+    },
+    playUiTap() { withAudio(() => click(1850, 0.05, 0, 0.025)); },
+    playGameOver() { withAudio(() => click(900, 0.08, 0, 0.06)); },
   };
 }
 
