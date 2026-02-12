@@ -106,11 +106,14 @@ h1 {
 .tile-layer {
   position: absolute;
   inset: var(--gap);
+  display: grid;
+  grid-template-columns: repeat(4, var(--tile-size));
+  grid-template-rows: repeat(4, var(--tile-size));
+  gap: var(--gap);
   pointer-events: none;
 }
 
 .tile {
-  position: absolute;
   width: var(--tile-size);
   height: var(--tile-size);
   border-radius: 10px;
