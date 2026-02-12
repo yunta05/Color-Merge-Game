@@ -136,7 +136,7 @@ function onTouchEnd(event) {
 }
 
 function takeTurn(direction) {
-  const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels } = move(board, direction);
+  const { nextBoard, moved, gainedScore, motionMap, mergedIds, mergedLevels, mergeEvents } = move(board, direction);
   if (!moved) return;
 
   const remainingMs = Math.max(turnDeadline - performance.now(), 0);
@@ -145,8 +145,8 @@ function takeTurn(direction) {
   board = nextBoard;
   const turnGain = gainedScore + speedBonus;
   updateScore(turnGain);
-  if (turnGain > 0 && mergedLevels.length > 0) {
-    showScorePopup(turnGain);
+  if (mergeEvents.length > 0) {
+    showMergeScorePopups(mergeEvents);
   }
 
   const spawnedTile = spawnRandomTile();
@@ -197,30 +197,35 @@ function updateSpeedBonusDisplay(remainingMs) {
   }
 }
 
-function showScorePopup(points) {
-  if (!scorePopupsElement || points <= 0) return;
+function showMergeScorePopups(mergeEvents) {
+  if (!scorePopupsElement || mergeEvents.length === 0) return;
 
-  const popup = document.createElement("div");
-  popup.className = "score-popup";
-  popup.textContent = `+${points}`;
+  mergeEvents.forEach((event, index) => {
+    const popup = document.createElement("div");
+    popup.className = "score-popup";
+    popup.textContent = `+${event.points}`;
+    popup.style.gridRow = String(event.row + 1);
+    popup.style.gridColumn = String(event.col + 1);
+    popup.style.animationDelay = `${index * 45}ms`;
 
-  if (points >= 700) {
-    popup.classList.add("score-popup-epic");
-  } else if (points >= 320) {
-    popup.classList.add("score-popup-high");
-  } else if (points >= 140) {
-    popup.classList.add("score-popup-mid");
-  }
+    if (event.points >= 512) {
+      popup.classList.add("score-popup-epic");
+    } else if (event.points >= 128) {
+      popup.classList.add("score-popup-high");
+    } else {
+      popup.classList.add("score-popup-mid");
+    }
 
-  scorePopupsElement.appendChild(popup);
+    scorePopupsElement.appendChild(popup);
 
-  requestAnimationFrame(() => {
-    popup.classList.add("score-popup-active");
+    requestAnimationFrame(() => {
+      popup.classList.add("score-popup-active");
+    });
+
+    popup.addEventListener("animationend", () => {
+      popup.remove();
+    }, { once: true });
   });
-
-  popup.addEventListener("animationend", () => {
-    popup.remove();
-  }, { once: true });
 }
 
 function move(source, direction) {
@@ -228,6 +233,7 @@ function move(source, direction) {
   const motionMap = new Map();
   const mergedIds = new Set();
   const mergedLevels = [];
+  const mergeSeeds = [];
   let moved = false;
   let gainedScore = 0;
 
@@ -244,7 +250,9 @@ function move(source, direction) {
         mergedLine.push({ tile: mergedTile, from: current.pos });
         mergedIds.add(mergedTile.id);
         mergedLevels.push(mergedTile.level);
-        gainedScore += scoreByLevel(mergedTile.level);
+        const mergedPoints = scoreByLevel(mergedTile.level);
+        gainedScore += mergedPoints;
+        mergeSeeds.push({ id: mergedTile.id, points: mergedPoints });
         i += 1;
       } else {
         mergedLine.push({ tile: current.tile, from: current.pos });
@@ -265,7 +273,15 @@ function move(source, direction) {
     }
   }
 
-  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds, mergedLevels };
+  const mergeEvents = mergeSeeds
+    .map((seed) => {
+      const motion = motionMap.get(seed.id);
+      if (!motion) return null;
+      return { row: motion.to.row, col: motion.to.col, points: seed.points };
+    })
+    .filter(Boolean);
+
+  return { nextBoard: next, moved, gainedScore, motionMap, mergedIds, mergedLevels, mergeEvents };
 }
 
 function readLine(source, direction, index) {
