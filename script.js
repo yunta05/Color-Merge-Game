@@ -359,7 +359,6 @@ function renderBoard({ motionMap = new Map(), mergedIds = new Set(), spawnedId =
 function createSoundEngine() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
 
-  // 非対応ブラウザ向け no-op 実装
   if (!AudioCtx) {
     return {
       unlock() {},
@@ -380,17 +379,15 @@ function createSoundEngine() {
 
     try {
       ctx = new AudioCtx();
-
-      // 出力を安定させるために軽くコンプを通す
       compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -26;
-      compressor.knee.value = 22;
-      compressor.ratio.value = 4;
-      compressor.attack.value = 0.003;
-      compressor.release.value = 0.18;
+      compressor.threshold.value = -22;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 6;
+      compressor.attack.value = 0.002;
+      compressor.release.value = 0.08;
 
       master = ctx.createGain();
-      master.gain.value = 0.55;
+      master.gain.value = 0.5;
 
       master.connect(compressor);
       compressor.connect(ctx.destination);
@@ -402,14 +399,11 @@ function createSoundEngine() {
 
   function unlock() {
     if (!ensureContext()) return;
-    if (ctx.state === "suspended") {
-      ctx.resume();
-    }
+    if (ctx.state === "suspended") ctx.resume();
   }
 
   function withAudio(callback) {
     if (!ensureContext()) return;
-
     const playNow = () => {
       if (!ctx || ctx.state !== "running") return;
       callback();
@@ -423,170 +417,102 @@ function createSoundEngine() {
     ctx.resume().then(playNow).catch(() => {});
   }
 
-  function semitone(baseFreq, offset) {
-    return baseFreq * (2 ** (offset / 12));
-  }
-
-  // 高速アタック + 短めディケイの ADSR
-  function playVoice(freq, {
+  // 全効果音の基本となる、硬質で短いクリック音
+  function playClick({
+    freq = 1800,
+    endFreq = 700,
+    gain = 0.07,
     start = 0,
-    gain = 0.12,
-    attack = 0.008,
-    decay = 0.13,
-    sustain = 0.42,
-    release = 0.2,
-    type = "triangle",
-    lowpass = 3800,
+    duration = 0.035,
+    q = 2.2,
   } = {}) {
     const now = ctx.currentTime + start;
     const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
     const amp = ctx.createGain();
-    const lp = ctx.createBiquadFilter();
 
-    osc.type = type;
+    osc.type = "square";
     osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(80, endFreq), now + duration);
 
-    lp.type = "lowpass";
-    lp.frequency.setValueAtTime(lowpass, now);
+    filter.type = "highpass";
+    filter.frequency.setValueAtTime(600, now);
+    filter.Q.value = q;
 
     amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), now + attack);
-    amp.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain * sustain), now + attack + decay);
-    amp.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay + release);
+    amp.gain.exponentialRampToValueAtTime(gain, now + 0.0025);
+    amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
-    osc.connect(lp);
-    lp.connect(amp);
+    osc.connect(filter);
+    filter.connect(amp);
     amp.connect(master);
 
     osc.start(now);
-    osc.stop(now + attack + decay + release + 0.03);
-  }
-
-  // マージ後タイル値を log2 で段階化して、メジャースケール内の三度堆積を構築
-  function buildMergeChord(tileValue) {
-    const step = Math.max(1, Math.round(Math.log2(tileValue))); // 2->1, 4->2, 8->3 ...
-    const c4 = 261.63;
-
-    // 要件: 2=C4, 4=C+E, 8=C+E+G
-    if (tileValue <= 2) return [c4];
-    if (tileValue <= 4) return [c4, semitone(c4, 4)];
-    if (tileValue <= 8) return [c4, semitone(c4, 4), semitone(c4, 7)];
-
-    // 16以上: メジャー系の三度堆積（C E G B D F# A ...）
-    const majorStack = [0, 4, 7, 11, 14, 18, 21, 24];
-    const count = Math.min(3 + Math.floor((step - 3) / 1), 6); // 同時発音を最大6音に抑制
-
-    // 大きい値ほど少し上のオクターブへ移動
-    const octaveLift = Math.min(Math.floor((step - 1) / 4), 2) * 12;
-
-    const notes = [];
-    for (let i = 0; i < count; i += 1) {
-      const offset = majorStack[i] + octaveLift;
-      notes.push(semitone(c4, offset));
-    }
-
-    return notes;
-  }
-
-  // 128以上で短い上昇アルペジオを追加
-  function playAscendingArpeggio(chordFreqs, baseStart, gainBase) {
-    const seq = [...chordFreqs].slice(0, 5);
-    seq.forEach((freq, i) => {
-      playVoice(freq * 2, {
-        start: baseStart + i * 0.045,
-        gain: gainBase * 0.55,
-        attack: 0.004,
-        decay: 0.08,
-        sustain: 0.35,
-        release: 0.11,
-        type: "sine",
-        lowpass: 5200,
-      });
-    });
-  }
-
-  // 要件関数: tileValue と chainCount に応じてマージ音を生成
-  function playMergeSound(tileValue, chainCount = 1) {
-    withAudio(() => {
-      const safeValue = Math.max(2, tileValue);
-      const step = Math.max(1, Math.round(Math.log2(safeValue)));
-      const chord = buildMergeChord(safeValue);
-
-      // 連鎖が増えるほど半音ずつ上昇（過度な上昇は抑制）
-      const chainShift = Math.min(Math.max(chainCount - 1, 0), 6);
-
-      // 値が上がるほど僅かに音量アップ
-      const levelGain = Math.min(0.1 + step * 0.008, 0.2);
-
-      chord.forEach((freq, i) => {
-        const voicedFreq = freq * (2 ** (chainShift / 12));
-        const spread = i * 0.014;
-        const voicingGain = levelGain * (1 - Math.min(i * 0.12, 0.45));
-
-        playVoice(voicedFreq, {
-          start: spread,
-          gain: voicingGain,
-          attack: 0.006,
-          decay: 0.12,
-          sustain: 0.4,
-          release: Math.min(0.16 + step * 0.01, 0.3),
-          type: i % 3 === 0 ? "triangle" : "sine",
-          lowpass: 3000 + Math.min(step * 180, 1400),
-        });
-      });
-
-      if (safeValue >= 128) {
-        playAscendingArpeggio(chord, 0.035, levelGain);
-      }
-    });
+    osc.stop(now + duration + 0.01);
   }
 
   function playMove() {
     withAudio(() => {
-      playVoice(1200, {
-        gain: 0.075,
-        attack: 0.002,
-        decay: 0.03,
-        sustain: 0.25,
-        release: 0.045,
-        type: "square",
-        lowpass: 5200,
-      });
+      playClick({ freq: 1700, endFreq: 760, gain: 0.055, duration: 0.03 });
     });
   }
 
   function playSpawn(level = 1) {
     withAudio(() => {
-      const pitch = 590 + level * 24;
-      playVoice(pitch, { gain: 0.07, attack: 0.005, decay: 0.08, sustain: 0.38, release: 0.12, type: "sine", lowpass: 4200 });
-      playVoice(pitch * 1.25, { start: 0.01, gain: 0.035, attack: 0.004, decay: 0.07, sustain: 0.3, release: 0.1, type: "triangle", lowpass: 4600 });
+      const lift = Math.min(level * 45, 260);
+      playClick({ freq: 1650 + lift, endFreq: 840 + lift * 0.3, gain: 0.06, duration: 0.032 });
+    });
+  }
+
+  // 既存ゲームロジックから呼ばれる API を維持
+  function playMergeSound(tileValue, chainCount = 1) {
+    withAudio(() => {
+      const step = Math.max(1, Math.round(Math.log2(Math.max(2, tileValue))));
+      const chain = Math.max(1, chainCount);
+
+      // 値と連鎖が上がるほど高く・少し強いクリックを重ねる
+      const baseFreq = 1500 + Math.min(step * 70, 900) + Math.min(chain * 35, 220);
+      const baseGain = Math.min(0.06 + step * 0.004 + chain * 0.003, 0.14);
+
+      playClick({
+        freq: baseFreq,
+        endFreq: baseFreq * 0.46,
+        gain: baseGain,
+        duration: 0.033,
+      });
+
+      // 連鎖感のための追従クリック
+      playClick({
+        freq: baseFreq * 1.22,
+        endFreq: baseFreq * 0.62,
+        gain: baseGain * 0.75,
+        start: 0.014,
+        duration: 0.028,
+      });
+
+      // 大きな値は3発目を追加（派手さは残しつつ全体はクリック系）
+      if (tileValue >= 128) {
+        playClick({
+          freq: baseFreq * 1.4,
+          endFreq: baseFreq * 0.76,
+          gain: baseGain * 0.62,
+          start: 0.03,
+          duration: 0.026,
+        });
+      }
     });
   }
 
   function playUiTap() {
     withAudio(() => {
-      playVoice(760, {
-        gain: 0.045,
-        attack: 0.003,
-        decay: 0.04,
-        sustain: 0.3,
-        release: 0.06,
-        type: "sine",
-      });
+      playClick({ freq: 1850, endFreq: 980, gain: 0.05, duration: 0.026 });
     });
   }
 
   function playGameOver() {
     withAudio(() => {
-      playVoice(280, {
-        gain: 0.095,
-        attack: 0.007,
-        decay: 0.18,
-        sustain: 0.36,
-        release: 0.2,
-        type: "sawtooth",
-        lowpass: 2200,
-      });
+      playClick({ freq: 980, endFreq: 320, gain: 0.08, duration: 0.06, q: 1.2 });
+      playClick({ freq: 760, endFreq: 250, gain: 0.05, duration: 0.05, start: 0.035, q: 1.1 });
     });
   }
 
